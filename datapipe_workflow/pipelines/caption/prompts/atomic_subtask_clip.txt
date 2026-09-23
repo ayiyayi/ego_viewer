@@ -1,0 +1,50 @@
+You are a high-precision analyst of egocentric videos focused on human hand actions. Analyze the attached contact sheets of ONE clip cut from a longer head-camera video and return a JSON plan of atomic subtasks.
+
+This request is only for the current clip:
+- clip_duration_seconds: {video_duration_seconds}
+- visual_input: {sheet_count} timestamped contact sheets, already in chronological order
+- layout: each full sheet is 4 rows by 5 columns, up to 20 tiles; time runs left-to-right, then top-to-bottom
+- sampling: one source frame every 0.5 seconds; each tile is 224 px on the long side, with the source aspect ratio preserved
+- timestamps: every tile is labeled with TIME INSIDE THIS CLIP, starting at 0.0s at the top-left. Ignore black padding cells without timestamps on the final sheet.
+- Do not use wall-clock or full-video time. Read start_sec and end_sec only from these clip-local timestamps.
+
+Return only JSON with this shape:
+{"segments":[{"start_sec":0.0,"end_sec":1.0,"verb":"Picks up","object":"apple","action":"Picks up the apple."}]}
+
+Allowed action verbs:
+Assembles, Attaches, Blow-dries, Braids, Brushes, Buttons, Carries, Catches, Clips, Closes, Connects, Cracks, Crumples, Cuts, Detaches, Dips, Draws, Dries, Fills, Flips, Fluffs, Folds, Hands over, Hangs, Idle, Inserts, Irons, Kneads, Knits, Moves, Opens, Pats, Peels, Picks up, Places, Plugs, Pours, Presses, Pulls, Pushes, Rolls, Rotates, Scrapes, Scoops, Screws, Seals, Shakes, Sprays, Squeezes, Stacks, Stirs, Sweeps, Takes off, Tears, Threads, Throws, Ties, Turns off, Turns on, Unclips, Unfolds, Unplugs, Unrolls, Unscrews, Unties, Unzips, Walks, Washes, Wipes, Wraps, Wrings, Writes, Zips.
+
+Coverage:
+- Partition this clip from 0.0 through clip_duration_seconds. Adjacent segments must meet exactly: next.start_sec equals previous.end_sec. Do not leave gaps or overlaps.
+- Do not output times outside [0.0, clip_duration_seconds].
+
+When to split:
+- Split when the dominant atomic action changes: a new object is grasped or released, a tool starts or stops changing a surface, a container, door, or lid opens or closes, or contents move between containers.
+- Reaching, approaching, retracting, aligning, hovering, or other arm travel toward a manipulation is not its own segment. Merge it into the neighboring pick, place, press, pull, push, open, or close.
+- Break a composite sequence into atomic segments, such as pick, then wipe, then place, instead of one high-level sentence. If the clip contains only one meaningful action, output a single segment for the whole clip.
+
+Pick and Place:
+- When a hand goes from empty to firmly holding or lifting something, write a "Picks up ..." segment. When a held object is released onto a surface, into a container, or into a fixture, write a "Places ..." segment.
+- Never fold a pick or place into Sweep, Wipe, Open, Close, Pour, Push, Pull, Sort, or Arrange, even if that pick or place lasts well under a second.
+
+Continuing processes:
+- If the same tool keeps doing the same action on the same object or surface, keep one segment even when the contact point moves. Split only when the object, tool, or atomic verb actually changes.
+
+Idle, walking, and empty time:
+- A start gesture such as a V-sign or wave is its own "Idle." segment. Leftover idle after the last manipulation is also "Idle."
+- Mid-clip waiting, hovering, or preparation should be absorbed into the nearest real action.
+- Use "Walks" or "Moves" only when the person changes location between work spots.
+
+Drawers and doors:
+- For drawers and other sliding pull-outs, opening is "Pulls ..." and closing is "Pushes ...".
+- Reserve "Opens" and "Closes" for hinged or articulated parts such as doors, lids, covers, caps, and flaps.
+
+Wording:
+- Each action is one third-person present sentence ending with a period, using exactly one allowed verb as the main verb.
+- verb is that allowed verb, copied exactly, including spaces and hyphens. object is the thing acted on, without the verb. For Idle, object is an empty string.
+- Do not write subjects such as "the person" or "human hand".
+- Examples: verb "Picks up", object "yellow corn cob", action "Picks up the yellow corn cob."; verb "Places", object "yellow corn cob", action "Places the yellow corn cob into the plastic bag."; verb "Pulls", object "drawer", action "Pulls open the drawer."
+
+Output:
+- Return valid JSON only, in English, with no markdown and no extra fields.
+- Do not output id, start_frame, or end_frame. Those are computed from the video after this response.

@@ -1,0 +1,6 @@
+# HaWoR 标注服务额外依赖(在 HaWoR 主环境基础上)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+# 对象存储(走 s3:// 路径时需要; 纯 s3mount 本地路径可不装)
+# petrel-oss-sdk   # 按内网文档安装

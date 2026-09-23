@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ego Viewer</title>
+  <link rel="stylesheet" href="/static/v7/style.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- ─────────────────────────────────────────────────────────── top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" role="img">
+          <defs>
+            <linearGradient id="mk" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#8b7cff" />
+              <stop offset="0.55" stop-color="#4d7cfe" />
+              <stop offset="1" stop-color="#2dd4bf" />
+            </linearGradient>
+          </defs>
+          <rect x="1" y="1" width="30" height="30" rx="9" fill="url(#mk)" />
+          <path d="M9 22 L16 9 L23 22" fill="none" stroke="#08101c"
+                stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12.2 18.2 H19.8" stroke="#08101c" stroke-width="2.6" stroke-linecap="round" />
+        </svg>
+      </span>
+      <span class="eyebrow">EGOCENTRIC · HAND-OBJECT INTERACTION</span>
+    </div>
+
+    <label class="sample-pick">
+      <span>Video</span>
+      <select id="sample" aria-label="Video"></select>
+    </label>
+
+    <div class="anno-bar" id="anno"></div>
+
+    <div id="status" class="status" data-state="busy">Loading</div>
+  </header>
+
+  <main>
+    <!-- ══ ego video | world frame ══════════════════════════════════════ -->
+    <section class="board">
+      <article class="col col-ego">
+        <header class="col-head">
+          <h2><i>01</i>Ego View</h2>
+          <span class="col-note" id="ego-note">undistorted · 21-pt skeleton</span>
+        </header>
+        <div class="stage" id="stage">
+          <div class="frame" id="frame">
+            <video id="video" playsinline preload="metadata"></video>
+            <canvas id="overlay"></canvas>
+
+            <div class="bracket tl" aria-hidden="true"></div>
+            <div class="bracket tr" aria-hidden="true"></div>
+            <div class="bracket bl" aria-hidden="true"></div>
+            <div class="bracket br" aria-hidden="true"></div>
+
+            <dl class="stats" id="stats"></dl>
+            <div class="hud hud-tl" id="hud-track"></div>
+            <div class="hud hud-bl" id="hud-frame"></div>
+          </div>
+          <div class="stage-veil" id="stage-veil"><span class="spin"></span></div>
+        </div>
+      </article>
+
+      <article class="col col-world">
+        <header class="col-head">
+          <h2><i>03</i>World Frame (3D)</h2>
+          <span class="col-note">ortho · az 40° el 20°</span>
+        </header>
+        <div class="world">
+          <canvas id="world"></canvas>
+          <div class="world-legend">
+            <span><i class="swatch left"></i>left hand</span>
+            <span><i class="swatch right"></i>right hand</span>
+            <span><i class="swatch cam"></i>camera</span>
+          </div>
+          <div class="world-caption" id="world-caption">Follow hands · fixed scale</div>
+        </div>
+      </article>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────── transport -->
+    <section class="deck">
+      <div class="deck-left">
+        <button id="play" class="btn-play" type="button" aria-label="Play">
+          <span class="glyph" aria-hidden="true">▶</span>
+        </button>
+        <button class="btn-step" data-step="-1" type="button" title="Step back 1 frame" aria-label="Previous frame">‹</button>
+        <button class="btn-step" data-step="1" type="button" title="Step forward 1 frame" aria-label="Next frame">›</button>
+        <span id="clock">00:00.0 / 00:00.0</span>
+        <div class="rates" id="rates" role="group" aria-label="Playback speed"></div>
+      </div>
+      <div class="deck-right">
+        <span class="hint"><kbd>Space</kbd> Play</span>
+        <span class="hint"><kbd>←</kbd><kbd>→</kbd> ±1s</span>
+      </div>
+    </section>
+
+    <!-- ──────────────────────────────────────────────────────── timeline -->
+    <section class="timeline" id="timeline">
+      <div class="ruler" id="ruler"></div>
+      <div class="track" id="track"></div>
+      <div class="playhead" id="playhead"><span class="playhead-time"></span></div>
+      <div class="tip" id="tip"></div>
+    </section>
+  </main>
+
+  <script src="/static/v7/app.js"></script>
+</body>
+</html>

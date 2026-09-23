@@ -1,0 +1,5 @@
+# batch processing （不一定能运行，可以参考流程）
+bash scripts/concurrent_hawor_json.sh
+
+# 单独function call形式
+python scripts/hawor_video_processor.py     --video_path /mnt/homes/xinyu-ldap/HaWoR/example/飞书20260506-231227.mp4     --output_dir /mnt/homes/xinyu-ldap/HaWoR/example/飞书20260506-231227_processed     --gpu_ids 0     --overwrite_output

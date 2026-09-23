@@ -1,0 +1,56 @@
+# DataPipeline workflow model/asset manifest.
+# Paths are relative to the repository root.
+# Download with:
+#   bash scripts/download_assets.sh
+
+assets:
+  - name: wilor_detector
+    required: true
+    target: pipelines/hawor/weights/external/detector.pt
+    url: https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/detector.pt
+    license_note: Check WiLoR/HuggingFace model license before use.
+
+  - name: hawor_checkpoint
+    required: true
+    target: pipelines/hawor/weights/hawor/checkpoints/hawor.ckpt
+    url: https://huggingface.co/ThunderVVV/HaWoR/resolve/main/hawor/checkpoints/hawor.ckpt
+    license_note: HaWoR model weights are governed by the upstream HaWoR license.
+
+  - name: hawor_infiller
+    required: true
+    target: pipelines/hawor/weights/hawor/checkpoints/infiller.pt
+    url: https://huggingface.co/ThunderVVV/HaWoR/resolve/main/hawor/checkpoints/infiller.pt
+    license_note: HaWoR model weights are governed by the upstream HaWoR license.
+
+  - name: hawor_model_config
+    required: true
+    target: pipelines/hawor/weights/hawor/model_config.yaml
+    url: https://huggingface.co/ThunderVVV/HaWoR/resolve/main/hawor/model_config.yaml
+    license_note: HaWoR model config from upstream HaWoR repository.
+
+  - name: droid_slam_checkpoint
+    required: true
+    target: pipelines/hawor/weights/external/droid.pth
+    gdrive_id: 1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh
+    source_page: https://drive.google.com/file/d/1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh/view?usp=sharing
+    license_note: DROID-SLAM official checkpoint; check upstream license.
+
+  - name: metric3d_checkpoint
+    required: true
+    target: pipelines/hawor/thirdparty/Metric3D/weights/metric_depth_vit_large_800k.pth
+    gdrive_id: 1eT2gG-kwsVzNy5nJrbm4KC-9DbNKyLnr
+    source_page: https://drive.google.com/file/d/1eT2gG-kwsVzNy5nJrbm4KC-9DbNKyLnr/view?usp=drive_link
+    license_note: Metric3D official checkpoint; check upstream license.
+
+manual_assets:
+  - name: mano_right
+    required: true
+    target: pipelines/hawor/_DATA/data/mano/MANO_RIGHT.pkl
+    source_page: https://mano.is.tue.mpg.de
+    instructions: Download MANO models from the official MANO website after accepting its license, unzip, and copy MANO_RIGHT.pkl here.
+
+  - name: mano_left
+    required: true
+    target: pipelines/hawor/_DATA/data_left/mano_left/MANO_LEFT.pkl
+    source_page: https://mano.is.tue.mpg.de
+    instructions: Download MANO models from the official MANO website after accepting its license, unzip, and copy MANO_LEFT.pkl here.

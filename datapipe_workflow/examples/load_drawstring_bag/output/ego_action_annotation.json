@@ -1,0 +1,90 @@
+[
+  {
+    "id": 1,
+    "start_ts": 0.0,
+    "end_ts": 3.0,
+    "start_frame": 0,
+    "end_frame": 108,
+    "scene": "bedroom",
+    "verb": "Opens",
+    "object": "pouch",
+    "action": "Opens the pouch."
+  },
+  {
+    "id": 2,
+    "start_ts": 3.0,
+    "end_ts": 6.0,
+    "start_frame": 108,
+    "end_frame": 216,
+    "scene": "bedroom",
+    "verb": "Pulls",
+    "object": "pouch drawstring",
+    "action": "Pulls the pouch drawstring."
+  },
+  {
+    "id": 3,
+    "start_ts": 8.5,
+    "end_ts": 14.0,
+    "start_frame": 306,
+    "end_frame": 504,
+    "scene": "bedroom",
+    "verb": "Ties",
+    "object": "pouch drawstring",
+    "action": "Ties the pouch drawstring."
+  },
+  {
+    "id": 4,
+    "start_ts": 14.0,
+    "end_ts": 16.0,
+    "start_frame": 504,
+    "end_frame": 576,
+    "scene": "bedroom",
+    "verb": "Places",
+    "object": "pouch",
+    "action": "place the pouch on the table."
+  },
+  {
+    "id": 5,
+    "start_ts": 16.0,
+    "end_ts": 20.0,
+    "start_frame": 576,
+    "end_frame": 720,
+    "scene": "bedroom",
+    "verb": "Opens",
+    "object": "container",
+    "action": "Opens the container."
+  },
+  {
+    "id": 6,
+    "start_ts": 20.0,
+    "end_ts": 23.5,
+    "start_frame": 720,
+    "end_frame": 846,
+    "scene": "bedroom",
+    "verb": "Picks up",
+    "object": "pouch",
+    "action": "Picks up the pouch."
+  },
+  {
+    "id": 7,
+    "start_ts": 23.5,
+    "end_ts": 25.5,
+    "start_frame": 846,
+    "end_frame": 918,
+    "scene": "bedroom",
+    "verb": "Places",
+    "object": "pouch",
+    "action": "Places the pouch into container."
+  },
+  {
+    "id": 8,
+    "start_ts": 25.5,
+    "end_ts": 32.194,
+    "start_frame": 918,
+    "end_frame": 1159,
+    "scene": "bedroom",
+    "verb": "Closes",
+    "object": "container",
+    "action": "Closes the container."
+  }
+]

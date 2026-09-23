@@ -1,0 +1,10 @@
+Please identify the place shown in an egocentric video. Five frames are attached, sampled evenly across the whole video in chronological order.
+
+Return only JSON with this shape:
+{"scene":"living room"}
+
+Rules:
+- scene is a short lowercase English place name, usually one to three words.
+- Name the room or setting, not the action and not the objects being manipulated.
+- Examples: "living room", "kitchen", "bedroom", "bathroom", "office", "hallway", "garage".
+- Return valid JSON only, with no markdown and no extra fields.

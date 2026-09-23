@@ -1,0 +1,1190 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Ego viewer — brief-first layout.
+
+   An investor-facing read of the same data. Design intent:
+     · information hierarchy: metadata and the action annotation form one
+       full-width brief at the top (read first), and the two visual channels —
+       ego video and world frame — sit side by side beneath it
+     · one dark substrate, so the video and the MANO meshes are the only
+       saturated things on screen — the UI never competes with the data
+     · a serif display face against a tight technical sans, for editorial
+       weight rather than dashboard-template weight
+     · hairline borders and layered ambient light instead of drop shadows
+     · every instrument surface reads as measured: tabular numerals,
+       unit-annotated captions, corner brackets on the frame
+
+   Data contract, element ids, and app.js class names are unchanged.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* substrate */
+  --b0: #070b12;
+  --b1: #0b111b;
+  --b2: #101826;
+  --b3: #16202f;
+  --plate: #0e1623;
+  --plate-hi: #131d2c;
+
+  /* ink */
+  --t0: #eef4fd;
+  --t1: #b9cbe2;
+  --t2: #8398b4;
+  --t3: #5b6e88;
+
+  /* accents */
+  --acc: #5b8cff;
+  --acc-hi: #8aabff;
+  --teal: #2dd4bf;
+  --violet: #9d8bff;
+  --amber: #edb04a;
+  --rose: #f2717b;
+
+  /* hands — official world-frame convention */
+  --hand-l: rgb(221, 178, 219);
+  --hand-r: rgb(50, 169, 229);
+
+  --line: rgba(129, 165, 214, 0.14);
+  --line-2: rgba(129, 165, 214, 0.26);
+  --glow: rgba(91, 140, 255, 0.5);
+
+  --r-lg: 14px;
+  --r-md: 9px;
+  --r-sm: 6px;
+
+  --sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+
+body {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: var(--t1);
+  font-family: var(--sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background: var(--b0);
+  background-image:
+    radial-gradient(1100px 600px at 8% -12%, rgba(91, 140, 255, 0.16), transparent 60%),
+    radial-gradient(900px 520px at 98% 2%, rgba(45, 212, 191, 0.10), transparent 58%),
+    radial-gradient(700px 500px at 60% 108%, rgba(157, 139, 255, 0.10), transparent 62%),
+    linear-gradient(180deg, var(--b1), var(--b0) 70%);
+  background-attachment: fixed;
+  overflow: hidden;
+}
+
+/* Very low-amplitude luminance noise. Keeps the large dark fields from
+   banding on projectors and cheap panels. */
+.grain {
+  position: fixed; inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+body > *:not(.grain) { position: relative; z-index: 1; }
+
+::selection { background: rgba(91, 140, 255, 0.34); color: #fff; }
+
+:focus-visible {
+  outline: 2px solid var(--acc-hi);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════════ top bar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(14, 22, 35, 0.86), rgba(9, 15, 24, 0.72));
+  flex: none;
+}
+
+.brand { display: flex; align-items: center; gap: 11px; flex: none; }
+.mark { width: 28px; height: 28px; display: block; flex: none; }
+.mark svg { width: 100%; height: 100%; display: block; }
+.topbar .eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+.brand-text strong {
+  display: block;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--t0);
+  line-height: 1.15;
+}
+.brand-text em {
+  display: block;
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--t3);
+  margin-top: 2px;
+}
+
+/* sample rail — the primary switcher at desktop width */
+.rail { display: flex; gap: 6px; margin-left: 14px; }
+.rail button {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 132px;
+  padding: 7px 12px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: var(--t2);
+  background: rgba(255, 255, 255, 0.022);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease),
+              color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+.rail button:hover {
+  color: var(--t1);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line-2);
+  transform: translateY(-1px);
+}
+.rail button b {
+  font-size: 12px; font-weight: 550;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  max-width: 160px;
+}
+.rail button s {
+  text-decoration: none;
+  font-size: 9.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--t3);
+}
+.rail button[aria-current="true"] {
+  color: var(--t0);
+  background: linear-gradient(180deg, rgba(91, 140, 255, 0.20), rgba(91, 140, 255, 0.07));
+  border-color: rgba(91, 140, 255, 0.46);
+  box-shadow: 0 0 22px -6px var(--glow);
+}
+.rail button[aria-current="true"] s { color: var(--acc-hi); }
+
+.sample-pick { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--t3); }
+.sample-pick select {
+  height: 32px; min-width: 210px; padding: 0 10px;
+  font: inherit; font-size: 12.5px;
+  color: var(--t0);
+  background: var(--b2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.sample-pick option { background: var(--b2); color: var(--t0); }
+
+.anno-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.028);
+  position: relative;
+  overflow: hidden;
+}
+.anno-bar .seg {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--t3);
+}
+.anno-bar .scene {
+  flex: none;
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--t0);
+  white-space: nowrap;
+}
+.anno-bar .act {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--t1);
+}
+.anno-bar .act b { font-weight: 600; color: var(--t0); }
+.anno-bar .act i {
+  font-style: normal;
+  margin: 0 6px;
+  color: var(--t3);
+}
+.anno-bar .when {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
+.anno-bar .bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.anno-bar .bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #8b7cff, #2dd4bf);
+}
+.anno-bar .empty,
+.anno-bar .warn {
+  font-size: 12px;
+  color: var(--t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.anno-bar .warn { color: #f0c674; }
+
+/* status lamp */
+.status {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-left: auto;
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--acc-hi);
+  background: rgba(91, 140, 255, 0.10);
+  border: 1px solid rgba(91, 140, 255, 0.30);
+  transition: color 0.2s var(--ease), background 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+.status::before {
+  content: "";
+  width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(138, 171, 255, 0.16);
+}
+.status[data-state="busy"]::before { animation: blink 1.15s ease-in-out infinite; }
+.status[data-state="ready"] {
+  color: var(--teal);
+  background: rgba(45, 212, 191, 0.10);
+  border-color: rgba(45, 212, 191, 0.30);
+}
+.status[data-state="pending"] {
+  color: var(--amber);
+  background: rgba(237, 176, 74, 0.10);
+  border-color: rgba(237, 176, 74, 0.30);
+}
+.status[data-state="error"] {
+  color: var(--rose);
+  background: rgba(242, 113, 123, 0.12);
+  border-color: rgba(242, 113, 123, 0.34);
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ═══════════════════════════════════════════════════════════════ metabar */
+
+.eyebrow {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.meta-title h1 {
+  margin: 6px 0 0;
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  line-height: 1.12;
+  color: var(--t0);
+}
+
+/* Measured readouts, mono + tabular so they never jitter. In the brief's left
+   cell these wrap into a matrix rather than one long row. */
+.frame .stats {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 4;
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  background: rgba(6, 12, 22, 0.52);
+  border: 1px solid rgba(176, 206, 242, 0.24);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 32px -18px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+.frame .stats div { min-width: max-content; }
+.frame .stats dt,
+.frame .stats dd { white-space: nowrap; }
+.stats dt {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.stats dd {
+  margin: 3px 0 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--t0);
+}
+.stats dd small {
+  font-size: 10px;
+  color: var(--t3);
+  margin-left: 2px;
+  letter-spacing: 0.02em;
+}
+
+/* ═════════════════════════════════════════════════════════════════ board */
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* visuals (all remaining space) · deck · timeline */
+  grid-template-rows: minmax(0, 1fr) 46px 90px;
+  padding: 12px 18px 14px;
+  gap: 10px;
+}
+
+/* ══════════════════════════════════════════ band 1 · the brief (read first) */
+
+.brief {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.9fr) minmax(0, 2.1fr);
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--plate);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 24px 60px -30px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+}
+
+/* left: which clip this is, and its measured facts */
+.brief-head {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 15px 20px 16px;
+  border-right: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(91, 140, 255, 0.07), transparent 70%);
+  min-width: 0;
+}
+
+/* right: the segment under the playhead */
+.brief-anno {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px 18px 15px;
+  min-width: 0;
+  /* Bounded so a rich segment scrolls inside the band instead of pushing the
+     ego video and world frame off the first screen. */
+  max-height: 30vh;
+}
+/* The empty state is a fixed, short block: let it show in full rather than
+   clipping mid-sentence against the cap above. */
+.brief-anno:has(.empty) { max-height: none; }
+
+/* ═════════════════════════════════════ band 2 · ego video | world frame */
+
+.board {
+  display: grid;
+  /* The ego frame is 16:9 and the world canvas is square, so the left column
+     gets the wider share; both then fill their panels at the same height. */
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.col {
+  display: grid;
+  grid-template-rows: 22px minmax(0, 1fr);
+  gap: 9px;
+  min-height: 0; min-width: 0;
+}
+
+.col-head {
+  display: flex; align-items: baseline; gap: 10px;
+  min-width: 0;
+}
+.col-head h2 {
+  margin: 0;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--t1);
+  white-space: nowrap;
+}
+.col-head h2 i {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--acc-hi);
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(91, 140, 255, 0.13);
+  border: 1px solid rgba(91, 140, 255, 0.26);
+}
+.col-note {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  color: var(--t3);
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* shared plate treatment: hairline + inner top highlight, no drop shadow */
+.stage, .world, .timeline, .deck {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--plate);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 24px 60px -30px rgba(0, 0, 0, 0.9);
+}
+
+/* ─────────────────────────────────────────────────────────────── ego view */
+
+.stage {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  min-height: 0;
+  background:
+    radial-gradient(90% 70% at 50% 44%, #0d1523 0%, #05080e 84%);
+}
+.frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+}
+.frame video, .frame canvas { display: block; width: 100%; height: 100%; }
+.frame canvas { position: absolute; inset: 0; }
+
+/* corner brackets — reads as a calibrated capture, not a video player */
+.bracket {
+  position: absolute;
+  width: 20px; height: 20px;
+  border: 1.5px solid rgba(214, 232, 255, 0.5);
+  pointer-events: none;
+}
+.bracket.tl { top: 9px; left: 9px; border-right: 0; border-bottom: 0; border-radius: 3px 0 0 0; }
+.bracket.tr { top: 9px; right: 9px; border-left: 0; border-bottom: 0; border-radius: 0 3px 0 0; }
+.bracket.bl { bottom: 9px; left: 9px; border-right: 0; border-top: 0; border-radius: 0 0 0 3px; }
+.bracket.br { bottom: 9px; right: 9px; border-left: 0; border-top: 0; border-radius: 0 0 3px 0; }
+
+.wordmark {
+  position: absolute; top: 13px; right: 38px;
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.hud {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.035em;
+  color: rgba(226, 238, 253, 0.9);
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: rgba(6, 11, 19, 0.6);
+  border: 1px solid rgba(160, 195, 240, 0.2);
+  backdrop-filter: blur(7px);
+  pointer-events: none;
+  white-space: nowrap;
+}
+/* Inset past the corner brackets so the two never overlap. */
+.hud-tl { display: none; }
+.hud-bl { bottom: 13px; left: 38px; }
+.hud:empty { display: none; }
+
+/* loading veil over the stage */
+.stage-veil {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(6, 10, 17, 0.62);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.26s var(--ease), visibility 0.26s var(--ease);
+}
+.stage-veil.on { opacity: 1; visibility: visible; }
+.spin {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(138, 171, 255, 0.22);
+  border-top-color: var(--acc-hi);
+  animation: spin 0.72s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ────────────────────────────────────────────────────────────── annotation */
+
+/* In the wide brief band the annotation reads left-to-right: the segment
+   identity sits in a fixed-width stub on the left, and the atomic actions
+   flow as cards to its right, so a multi-action segment fills the band
+   instead of forcing a tall scroll. */
+.anno {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 0 20px;
+  align-items: start;
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 165, 214, 0.3) transparent;
+}
+
+/* left stub: kicker, scene, ranges, progress */
+.anno > .kicker,
+.anno > h3,
+.anno > .meta,
+.anno > .bar {
+  grid-column: 1;
+}
+
+.anno > .warn {
+  grid-column: 1 / -1;
+}
+
+/* The empty state has no two-part split — let it span the whole band. */
+.anno > .empty {
+  grid-column: 1 / -1;
+  max-width: 940px;
+}
+.anno > .empty .path { max-width: 100%; }
+
+/* Actions laid out as a responsive row of cards. Wrapping to a second line is
+   fine; the band scrolls only when a segment is unusually rich. */
+.anno .actions {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  display: grid;
+  /* auto-fill, not auto-fit: a single action keeps a readable card width
+     instead of stretching across the whole band. */
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 10px;
+  align-content: start;
+  justify-content: start;
+  min-width: 0;
+}
+.anno::-webkit-scrollbar { width: 8px; }
+.anno::-webkit-scrollbar-track { background: transparent; }
+.anno::-webkit-scrollbar-thumb {
+  background: rgba(129, 165, 214, 0.26);
+  border-radius: 99px;
+}
+
+/* entry animation, restarted each time the segment changes */
+.anno > .kicker, .anno > h3, .anno > .meta, .anno > .bar,
+.anno .action, .anno > .warn {
+  animation: rise 0.34s var(--ease) both;
+}
+.anno > h3 { animation-delay: 0.03s; }
+.anno > .meta { animation-delay: 0.05s; }
+.anno > .bar { animation-delay: 0.07s; }
+.anno .action:nth-child(1) { animation-delay: 0.09s; }
+.anno .action:nth-child(2) { animation-delay: 0.13s; }
+.anno .action:nth-child(3) { animation-delay: 0.17s; }
+.anno .action:nth-child(n+4) { animation-delay: 0.2s; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anno > *, .anno .action { animation: none !important; }
+  .spin { animation-duration: 2s; }
+  .status::before { animation: none !important; }
+}
+
+.kicker {
+  display: flex; align-items: center; gap: 9px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.kicker .of {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--t2);
+}
+.anno h3 {
+  margin: 7px 0 10px;
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.14;
+  color: var(--t0);
+  text-transform: capitalize;
+}
+
+.meta { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+/* Stub chips sit on their own lines so the narrow column never truncates a
+   time or frame range. */
+.anno > .meta {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.anno > .meta .chip { text-align: center; }
+.chip {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  padding: 3.5px 8px;
+  border-radius: var(--r-sm);
+  color: var(--t1);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.chip.hand-left  { color: #e7c9e5; background: rgba(221, 178, 219, 0.12); border-color: rgba(221, 178, 219, 0.3); }
+.chip.hand-right { color: #a5d9f4; background: rgba(50, 169, 229, 0.12);  border-color: rgba(50, 169, 229, 0.32); }
+.chip.hand-both  { color: #c9d6f5; background: rgba(140, 165, 245, 0.12); border-color: rgba(140, 165, 245, 0.3); }
+
+/* segment progress */
+.bar {
+  position: relative;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+  margin: 2px 0 0;
+}
+.bar span {
+  display: block; height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--acc), var(--teal));
+  box-shadow: 0 0 12px -1px var(--glow);
+}
+
+.action {
+  position: relative;
+  padding: 13px 14px 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--plate-hi), rgba(19, 29, 44, 0.45));
+  transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
+}
+.action::before {
+  content: "";
+  position: absolute; left: 0; top: 11px; bottom: 11px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(180deg, var(--acc), var(--violet));
+}
+.action:hover { border-color: var(--line-2); transform: translateX(1px); }
+
+.action-no {
+  position: absolute; top: 12px; right: 12px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t3);
+  width: 17px; height: 17px;
+  border-radius: 4px;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--line);
+}
+.action-head { padding-right: 26px; line-height: 1.35; }
+.action .verb {
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+  color: var(--t0);
+}
+.action .arrow {
+  margin: 0 7px;
+  color: var(--acc);
+  font-weight: 500;
+}
+.action .object {
+  font-size: 14px;
+  color: var(--t1);
+}
+.action .meta { margin: 10px 0 0; }
+.action p {
+  margin: 9px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--t2);
+}
+.action p:empty { display: none; }
+
+/* empty state */
+.empty {
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-md);
+  padding: 17px;
+  background:
+    repeating-linear-gradient(-45deg,
+      rgba(255, 255, 255, 0.014) 0 8px,
+      transparent 8px 16px),
+    var(--plate-hi);
+  animation: rise 0.34s var(--ease) both;
+}
+.empty h3 { margin: 8px 0 10px; font-size: 20px; }
+.empty p { margin: 9px 0 0; font-size: 12.5px; line-height: 1.65; color: var(--t2); }
+.empty code {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  color: var(--acc-hi);
+  background: rgba(91, 140, 255, 0.12);
+  border: 1px solid rgba(91, 140, 255, 0.22);
+}
+.path {
+  display: block;
+  margin-top: 11px;
+  padding: 10px 11px;
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--teal);
+  background: rgba(3, 7, 13, 0.6);
+  border: 1px solid var(--line);
+  word-break: break-all;
+}
+.fields {
+  margin: 12px 0 0;
+  padding-left: 17px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--t2);
+}
+.fields::marker { color: var(--t3); }
+
+.warn {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  line-height: 1.55;
+  color: #f4cf9a;
+  background: rgba(237, 176, 74, 0.08);
+  border: 1px solid rgba(237, 176, 74, 0.26);
+  border-left: 2px solid var(--amber);
+}
+
+/* ─────────────────────────────────────────────────────────── world frame */
+
+.world {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(84% 70% at 50% 40%, #121c2b 0%, #080d16 86%);
+}
+.world canvas {
+  display: block;
+  width: auto; height: auto;
+  max-width: 100%; max-height: 100%;
+}
+.world-legend {
+  position: absolute; right: 13px; top: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--t2);
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(6, 11, 19, 0.5);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(7px);
+  pointer-events: none;
+}
+.world-legend span { display: flex; align-items: center; gap: 7px; }
+.world-legend .swatch {
+  width: 9px; height: 3px; border-radius: 2px;
+}
+.world-legend .swatch.left  { background: var(--hand-l); box-shadow: 0 0 7px rgba(221, 178, 219, 0.55); }
+.world-legend .swatch.right { background: var(--hand-r); box-shadow: 0 0 7px rgba(50, 169, 229, 0.55); }
+.world-legend .swatch.cam   { background: #8e9aa8; }
+
+.world-caption {
+  position: absolute; left: 13px; bottom: 12px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  color: var(--t2);
+  padding: 4px 9px;
+  border-radius: var(--r-sm);
+  background: rgba(6, 11, 19, 0.5);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(7px);
+}
+
+/* ═════════════════════════════════════════════════════════════ transport */
+
+.deck {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 18px;
+  padding: 0 14px;
+  border-radius: var(--r-lg);
+}
+.deck-left { display: flex; align-items: center; gap: 9px; }
+.deck-right { display: flex; align-items: center; gap: 14px; }
+
+.btn-play {
+  width: 33px; height: 33px;
+  display: grid; place-items: center;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #06101f;
+  background: linear-gradient(160deg, #a8c3ff, var(--acc) 62%, #3f6fe8);
+  box-shadow: 0 0 20px -4px var(--glow);
+  transition: transform 0.14s var(--ease), box-shadow 0.2s var(--ease), filter 0.2s var(--ease);
+}
+.btn-play:hover { filter: brightness(1.08); box-shadow: 0 0 26px -3px var(--glow); }
+.btn-play:active { transform: scale(0.94); }
+.btn-play .glyph { font-size: 10px; line-height: 1; margin-left: 1px; }
+.btn-play[data-playing="true"] .glyph { margin-left: 0; letter-spacing: -1px; }
+
+.btn-step {
+  width: 27px; height: 27px;
+  display: grid; place-items: center;
+  font: inherit; font-size: 14px;
+  cursor: pointer;
+  color: var(--t2);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  transition: color 0.16s var(--ease), background 0.16s var(--ease), border-color 0.16s var(--ease);
+}
+.btn-step:hover { color: var(--t0); background: rgba(255, 255, 255, 0.07); border-color: var(--line-2); }
+
+#clock {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--t0);
+}
+
+.rates { display: flex; gap: 3px; margin-left: 10px; }
+.rates button {
+  padding: 4px 9px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  color: var(--t3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  transition: color 0.16s var(--ease), background 0.16s var(--ease), border-color 0.16s var(--ease);
+}
+.rates button:hover { color: var(--t1); background: rgba(255, 255, 255, 0.045); }
+.rates button[aria-pressed="true"] {
+  color: var(--acc-hi);
+  background: rgba(91, 140, 255, 0.13);
+  border-color: rgba(91, 140, 255, 0.3);
+}
+
+.hint {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+kbd {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  padding: 2.5px 5px;
+  border-radius: 4px;
+  color: var(--t2);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════════ timeline */
+
+.timeline {
+  position: relative;
+  padding: 26px 14px 12px;
+}
+
+/* Tick marks and labels drawn by app.js. Labels sit above the marks, and the
+   playhead badge is parked clear of this band. */
+.ruler {
+  position: absolute; left: 14px; right: 14px; top: 8px;
+  height: 15px;
+  pointer-events: none;
+}
+.ruler i {
+  position: absolute; bottom: 0;
+  width: 1px; height: 4px;
+  background: var(--line-2);
+}
+.ruler i.major { height: 6px; background: rgba(129, 165, 214, 0.42); }
+.ruler b {
+  position: absolute; top: 0;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--t3);
+  white-space: nowrap;
+}
+
+.track {
+  position: relative;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: rgba(3, 7, 13, 0.52);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  cursor: crosshair;
+}
+.track.empty::after {
+  content: "NO SEGMENTS";
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.15em;
+  color: var(--t3);
+}
+
+.block {
+  position: absolute; top: 4px; bottom: 4px;
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 32px;
+  color: rgba(255, 255, 255, 0.96);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  opacity: 0.66;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  transition: opacity 0.2s var(--ease), box-shadow 0.2s var(--ease), filter 0.2s var(--ease);
+}
+.block:hover { opacity: 0.9; filter: saturate(1.1) brightness(1.08); }
+.block.is-current {
+  opacity: 1;
+  filter: saturate(1.15);
+  box-shadow:
+    0 0 0 1.5px rgba(255, 255, 255, 0.82) inset,
+    0 0 18px -3px rgba(0, 0, 0, 0.7);
+}
+
+.playhead {
+  position: absolute;
+  top: 23px;
+  height: 46px;
+  width: 1.5px;
+  left: 14px;
+  background: linear-gradient(180deg, #fff, var(--acc-hi));
+  box-shadow: 0 0 12px rgba(138, 171, 255, 0.9);
+  pointer-events: none;
+}
+.playhead::before {
+  content: "";
+  position: absolute; top: -4px; left: -3.25px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 12px rgba(138, 171, 255, 0.95);
+}
+/* Rides below the needle's head, inside the track. Only shown while the user
+   is on the timeline, so it does not sit on top of a block's label. */
+.playhead-time {
+  position: absolute; top: 9px; left: 7px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  color: #eaf2ff;
+  background: rgba(8, 14, 24, 0.92);
+  border: 1px solid rgba(138, 171, 255, 0.34);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.16s var(--ease);
+}
+.timeline:hover .playhead-time,
+.timeline.scrubbing .playhead-time { opacity: 1; }
+
+/* hover tooltip over the track */
+.tip {
+  position: absolute;
+  bottom: 58px;
+  transform: translateX(-50%);
+  max-width: 260px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--t0);
+  background: rgba(10, 17, 28, 0.96);
+  border: 1px solid var(--line-2);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.16s var(--ease);
+  z-index: 5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tip.on { opacity: 1; }
+.tip b { font-weight: 600; }
+.tip s {
+  text-decoration: none;
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--t3);
+}
+
+/* ══════════════════════════════════════════════════════════════ stacking */
+
+@media (max-width: 1400px) {
+  /* The brief's two cells go over/under before the band gets cramped. */
+  .brief { grid-template-columns: 1fr; }
+  .brief-head {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .stats { margin-top: 0; grid-template-columns: repeat(6, auto); }
+}
+
+@media (max-width: 1100px) {
+  body { overflow: auto; }
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 11px 16px;
+  }
+  .status { margin-left: 0; order: 3; }
+  .brief-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .brief-anno { padding: 13px 16px 15px; }
+  .meta-title h1 { font-size: 23px; }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px 14px; }
+  /* Stacked, the annotation reverts to a single column: at this width the
+     side-by-side stub + cards split has no room to read. */
+  .anno { grid-template-columns: 1fr; gap: 0; }
+  .anno > .kicker, .anno > h3, .anno > .meta, .anno > .bar,
+  .anno .actions, .anno > .warn, .anno > .empty { grid-column: 1; }
+  .anno .actions { grid-row: auto; margin-top: 13px; }
+  .anno > .meta { flex-direction: row; align-items: center; }
+  main {
+    display: block;
+    grid-template-rows: none;
+    padding: 14px 16px 18px;
+  }
+  .brief { margin-bottom: 12px; }
+  /* Stacked: drop the grid entirely. As a grid the columns became equal-height
+     rows, and the aspect-ratio'd stage grew past its row and overlapped the
+     section below. Block flow lets each panel take its own natural height. */
+  .board {
+    display: block;
+    grid-template-columns: none;
+    margin-bottom: 12px;
+  }
+  .col { display: block; margin-bottom: 14px; }
+  .col:last-child { margin-bottom: 0; }
+  .col-head { margin-bottom: 9px; }
+  /* Stacked, the stage is as wide as the page. app.js sets --stage-ar from the
+     clip's own dimensions, so neither a 16:9 nor a square clip gets dead
+     margins; the fallback only applies before metadata arrives. */
+  .stage {
+    min-height: 0;
+    aspect-ratio: var(--stage-ar, 16 / 9);
+  }
+  .anno { max-height: none; }
+  .world { height: 320px; }
+  .deck { height: 46px; flex: none; margin-bottom: 12px; }
+  .deck-right { display: none; }
+  .timeline { height: 90px; }
+}

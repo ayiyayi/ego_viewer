@@ -1,0 +1,5 @@
+{
+  "base_url": "http://HOST:PORT/v1",
+  "api_key": "<YOUR_API_KEY>",
+  "model": "gemini-3.6-flash"
+}

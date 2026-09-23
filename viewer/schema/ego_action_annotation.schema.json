@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ego_action_annotation.schema.json",
+  "title": "Open-AoE ego_action_annotation",
+  "description": "Drop-in file ego_annotation/ego_action_annotation.json. A JSON array of action segments. Timestamps and frame indices may be numbers or numeric strings, matching the Open-AoE delivery.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": ["id", "start_ts", "end_ts", "start_frame", "end_frame", "scene", "verb", "object", "action"],
+    "properties": {
+      "id": { "type": ["integer", "string"] },
+      "start_ts": { "type": ["number", "string"] },
+      "end_ts": { "type": ["number", "string"] },
+      "start_frame": { "type": ["integer", "string"] },
+      "end_frame": { "type": ["integer", "string"] },
+      "scene": { "type": "string" },
+      "verb": { "type": "string" },
+      "object": { "type": "string" },
+      "action": { "type": "string" }
+    }
+  }
+}

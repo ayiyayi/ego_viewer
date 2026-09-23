@@ -1,0 +1,76 @@
+# DataPipeline common Python dependencies.
+#
+# Install:
+#   python -m pip install -r requirements.txt
+#
+# Scope:
+# - caption pipeline Python/API dependencies
+# - HaWoR service wrapper and most pure-Python dependencies
+#
+# Not covered by this single requirements file:
+# - CUDA Toolkit / nvcc
+# - DROID-SLAM native extension build
+# - PyTorch3D CUDA rebuild
+# - model weights and MANO assets
+# For the full HaWoR GPU runtime, run scripts/install_hawor_env.sh after this file.
+
+gdown>=5.0
+
+# Caption runtime
+openai>=1.0
+httpx>=0.27
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+
+# HaWoR service wrapper
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+
+# HaWoR core pure-Python dependencies
+pyrender
+scikit-image
+smplx==0.1.28
+yacs
+timm
+einops
+xtcocotools
+pandas
+hydra-core
+hydra-submitit-launcher
+hydra-colorlog
+pyrootutils
+rich
+webdataset
+ultralytics
+pulp
+supervision
+pycocotools
+joblib
+natsort
+evo
+pytorch-minimize
+mmengine==0.10.4
+HTML4Vision
+plyfile
+aitviewer
+easydict
+loguru
+dill
+lapx
+moderngl-window==2.4.6
+
+# Legacy HaWoR packages intentionally not listed here because they need special pip flags:
+# - mmcv==1.3.9 needs --no-build-isolation and setuptools<70
+# - chumpy@git+https://github.com/mattloper/chumpy needs --no-build-isolation
+# scripts/install_hawor_env.sh installs these correctly.
+
+# Torch stack for HaWoR's current CUDA 11.7 runtime.
+# If your environment already has a matching torch build, you may skip these.
+--extra-index-url https://download.pytorch.org/whl/cu117
+torch==1.13.0+cu117
+torchvision==0.14.0+cu117
+
+# PyG wheel index for torch-scatter matching torch 1.13.0 + CUDA 11.7.
+-f https://data.pyg.org/whl/torch-1.13.0+cu117.html
+torch-scatter==2.1.2

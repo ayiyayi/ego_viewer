@@ -1,0 +1,22 @@
+{
+  "samples": [
+    {
+      "id": "aoe_20260201_193100_p000",
+      "title": "Open-AoE 样例 · 客厅",
+      "root": "/data/heyuping/openaoe_sample_bi/aoe_20260201_193100_p000",
+      "video": "ego_process/ego_undistorted_video/raw_video_undistorted.mp4",
+      "annotation": "ego_annotation/ego_action_annotation.json",
+      "hands_npz": "ego_process/ego_hands_reconstruction/hands.npz",
+      "keypoints": "/data/heyuping/ego_viewer/web_cache/aoe_20260201_193100_p000/keypoints.npz"
+    },
+    {
+      "id": "demo_pending",
+      "title": "本地 Demo · 标注待填入",
+      "root": "/data/heyuping/ego_viewer/web_samples/demo_pending",
+      "video": "ego_process/ego_undistorted_video/raw_video_undistorted.mp4",
+      "annotation": "ego_annotation/ego_action_annotation.json",
+      "hands_npz": null,
+      "keypoints": null
+    }
+  ]
+}

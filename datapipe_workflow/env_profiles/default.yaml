@@ -1,0 +1,22 @@
+resources:
+  gpus: ["0"]
+  gpu_file_lock: true
+  gpu_lock_dir: /tmp/datapipeline_gpu_locks
+
+pipelines:
+  hawor:
+    python: /data/heyuping/ego_viewer/envs/hawor/bin/python
+    working_dir: pipelines/hawor
+    defaults:
+      gpu_count: 1
+      scratch: /data/heyuping/ego_viewer/scratch
+      vis_mode: off
+      img_focal: 600.0
+      overwrite: ""
+  caption:
+    python: /data/heyuping/ego_viewer/envs/hawor/bin/python
+    defaults:
+      type: gpt
+      freq: 0.5
+      clip_length: 10
+      global_sample: 8
