@@ -18,7 +18,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 SAMPLES_PATH = ROOT / "samples.json"
-EXAMPLES_ROOT = Path("/data-hyp/ego_viewer/datapipe_workflow/examples")
+EXAMPLES_ROOT = ROOT.parent / "datapipe_workflow" / "examples"
 SCHEMA_PATH = ROOT / "schema" / "ego_action_annotation.schema.json"
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("VIEWER_PORT", "8770"))
