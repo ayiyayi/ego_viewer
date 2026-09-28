@@ -223,7 +223,7 @@ class HaWoRVideoProcessor:
         if not merged_dir.is_dir():
             raise FileNotFoundError(f"Merged output directory not found: {merged_dir}")
 
-        for name in ("cam_space", "SLAM", "extracted_images"):
+        for name in ("cam_space", "SLAM", "extracted_images", "sam_boxes.npz"):
             src = merged_dir / name
             if not src.exists():
                 continue
@@ -250,6 +250,7 @@ class HaWoRVideoProcessor:
         paths = [
             work_dir,
             log_path,
+            output_dir / "sam_boxes.npz",
             output_dir / "cam_space",
             output_dir / "cam_space_50fps",
             output_dir / "SLAM",

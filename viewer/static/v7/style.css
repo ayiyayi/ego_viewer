@@ -982,6 +982,13 @@ kbd {
   position: absolute; left: 14px; right: 14px; top: 8px;
   height: 15px;
   pointer-events: none;
+  overflow: hidden;
+}
+.ruler-strip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
 }
 .ruler i {
   position: absolute; bottom: 0;
@@ -1009,6 +1016,13 @@ kbd {
   border: 1px solid var(--line);
   overflow: hidden;
   cursor: crosshair;
+}
+.track-strip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  will-change: transform;
 }
 .track.empty::after {
   content: "NO SEGMENTS";

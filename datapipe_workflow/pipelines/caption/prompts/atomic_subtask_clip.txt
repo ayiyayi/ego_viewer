@@ -1,12 +1,14 @@
 You are a high-precision analyst of egocentric videos focused on human hand actions. Analyze the attached contact sheets of ONE clip cut from a longer head-camera video and return a JSON plan of atomic subtasks.
 
+Episode instruction:
+{reference}
+
 This request is only for the current clip:
 - clip_duration_seconds: {video_duration_seconds}
 - visual_input: {sheet_count} timestamped contact sheets, already in chronological order
 - layout: each full sheet is 4 rows by 5 columns, up to 20 tiles; time runs left-to-right, then top-to-bottom
 - sampling: one source frame every 0.5 seconds; each tile is 224 px on the long side, with the source aspect ratio preserved
-- timestamps: every tile is labeled with TIME INSIDE THIS CLIP, starting at 0.0s at the top-left. Ignore black padding cells without timestamps on the final sheet.
-- Do not use wall-clock or full-video time. Read start_sec and end_sec only from these clip-local timestamps.
+- timestamps: ignore black padding cells that have no timestamp on the final sheet
 
 Return only JSON with this shape:
 {"segments":[{"start_sec":0.0,"end_sec":1.0,"verb":"Picks up","object":"apple","action":"Picks up the apple."}]}
@@ -40,6 +42,7 @@ Drawers and doors:
 - Reserve "Opens" and "Closes" for hinged or articulated parts such as doors, lids, covers, caps, and flaps.
 
 Wording:
+- Do not use Presses when that push only completes a more specific manipulation; merge it into that action, such as Inserts the pipette into the tip instead of Presses the pipette.
 - Each action is one third-person present sentence ending with a period, using exactly one allowed verb as the main verb.
 - verb is that allowed verb, copied exactly, including spaces and hyphens. object is the thing acted on, without the verb. For Idle, object is an empty string.
 - Do not write subjects such as "the person" or "human hand".
@@ -47,4 +50,3 @@ Wording:
 
 Output:
 - Return valid JSON only, in English, with no markdown and no extra fields.
-- Do not output id, start_frame, or end_frame. Those are computed from the video after this response.

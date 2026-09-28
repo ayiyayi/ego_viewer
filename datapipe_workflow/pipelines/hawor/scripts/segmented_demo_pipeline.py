@@ -661,6 +661,24 @@ def process_video(args: argparse.Namespace, video_path: str) -> None:
         overlap_policy=args.overlap_policy,
     )
 
+    sam_paths = [os.path.join(m.seq_dir, 'sam_boxes.npz') for m in metas]
+    if any(os.path.isfile(p) for p in sam_paths):
+        if not all(os.path.isfile(p) for p in sam_paths):
+            raise ValueError('Only some chunks have SAM3 boxes')
+        archives = []
+        for meta, path in zip(metas, sam_paths):
+            with np.load(path, allow_pickle=False) as data:
+                item = {k: data[k].copy() for k in data.files}
+            if item['boxes'].shape != (meta.frame_count, 2, 4):
+                raise ValueError('SAM3 chunk frame count mismatch')
+            if archives and any(not np.array_equal(item[k], archives[0][k]) for k in ('width', 'height', 'side_order')):
+                raise ValueError('SAM3 chunk coordinate conventions differ')
+            archives.append(item)
+        np.savez_compressed(os.path.join(merged_root, 'sam_boxes.npz'),
+                           boxes=np.concatenate([a['boxes'] for a in archives]),
+                           valid=np.concatenate([a['valid'] for a in archives]),
+                           **{k: archives[0][k] for k in ('width', 'height', 'side_order')})
+
     merged_slam_dir = os.path.join(merged_root, "SLAM")
     merged_slam_file = merge_slam(
         chunk_metas=metas,

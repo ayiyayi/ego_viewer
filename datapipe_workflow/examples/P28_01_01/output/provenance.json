@@ -1,0 +1,35 @@
+{
+  "sample_id": "P28_01_01_wilor_sam_finebio_cam_v2_stable",
+  "source_sample": "/data/heyuping/ego_viewer/finebio_reference_v2/P28_01_01_wilor_sam_finebio_cam_v2",
+  "video": "/data-hyp/ego_viewer/hand_test_videos/P28_01_01.mp4",
+  "fps": 29.970029830932617,
+  "rules": [
+    "A camera step above 0.08 m breaks the track. Wrists are not compared across that break, and the gap is not interpolated.",
+    "Inside a continuous camera segment, a wrist step above 1.5 m/s (and never above 0.12 m) is abnormal and stays masked when the previous hand returns within 90 frames.",
+    "Interpolate at most 5 frames, and only frames that had no detection. Endpoints must be within 0.10 m, the filled step at or below 1.5 m/s, and the finger pose within 0.03 m. A masked detection is never replaced."
+  ],
+  "speed_limit_m_s": 1.5,
+  "camera_break_m": 0.08,
+  "max_interpolation_frames": 5,
+  "left": {
+    "original": 3934,
+    "kept": 3612,
+    "masked": 322,
+    "interpolated": 99,
+    "final": 3711,
+    "overwrote_original": 0,
+    "adjacent_speed_max_m_s": 1.4417581230504908,
+    "adjacent_over_1_5": 0
+  },
+  "right": {
+    "original": 3527,
+    "kept": 3222,
+    "masked": 305,
+    "interpolated": 134,
+    "final": 3356,
+    "overwrote_original": 0,
+    "adjacent_speed_max_m_s": 1.4871069264392958,
+    "adjacent_over_1_5": 0
+  },
+  "did_not_overwrite": "/data/heyuping/ego_viewer/finebio_reference_v2/P28_01_01_wilor_sam_finebio_cam_v2"
+}

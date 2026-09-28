@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""One-video demo: 16s clips → contact sheets → Gemini → stitched atomic intervals.
+"""One video: 20s clips, contact sheets, Gemini, then stitched atomic intervals.
 
 Each sheet is labeled from 0s for that clip. Offsets are added only when
-joining clips back onto the full video. Sequential, no agent, no thread pool.
+joining clips back onto the full video. Contact sheets and per-clip JSON are
+removed after the viewer file is written. Sequential, no agent, no thread pool.
 
-Example, from the datapipe_workflow directory:
-  python pipelines/caption/atomic_subtask_demo.py \\
-    --video examples/caption_93009/input/93009_1min.mp4 \\
-    --output examples/caption_93009/output
+Prefer datapipe_workflow/annotate_video.py. This module is the caption step.
 """
 
 from __future__ import annotations
@@ -17,6 +15,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -35,7 +34,7 @@ FPS = 2.0
 LONG_SIDE = 224
 TILES_PER_SHEET = 20
 COLUMNS = 5
-CLIP_SEC = 16.0
+CLIP_SEC = 20.0
 ALLOWED_VERBS = (
     "Assembles", "Attaches", "Blow-dries", "Braids", "Brushes", "Buttons", "Carries", "Catches",
     "Clips", "Closes", "Connects", "Cracks", "Crumples", "Cuts", "Detaches", "Dips", "Draws",
@@ -229,14 +228,11 @@ def load_prompt(path, duration, sheet_count, instruction=""):
     text = Path(path).read_text(encoding="utf-8").strip()
     text = text.replace("{video_duration_seconds}", f"{duration:.3f}")
     text = text.replace("{sheet_count}", str(sheet_count))
-    extra = [
-        f"clip_duration_seconds: {duration:.3f}",
-        f"contact_sheet_count: {sheet_count}",
-        "All tile timestamps start at 0.0s for this clip.",
-    ]
-    if instruction:
-        extra.insert(0, f"Episode instruction: {instruction}")
-    return text + "\n" + "\n".join(extra) + "\n"
+    if instruction.strip():
+        text = text.replace("{reference}", instruction.strip())
+    else:
+        text = re.sub(r"\n*Episode instruction:\n\{reference\}\n*", "\n\n", text, count=1)
+    return text.strip() + "\n"
 
 
 def sheet_messages(prompt, sheets):
@@ -363,6 +359,26 @@ def stitch(segments, duration):
     return compact
 
 
+def merge_clip_edges(segments, boundaries):
+    """Join a clip's last segment to the next clip's first when the action text matches."""
+    if len(segments) < 2:
+        return [dict(seg) for seg in segments]
+    cuts = {round(float(boundary), 3) for boundary in boundaries}
+    ordered = sorted(segments, key=lambda seg: (seg["start_sec"], seg["end_sec"]))
+    merged = [dict(ordered[0])]
+    for seg in ordered[1:]:
+        prev = merged[-1]
+        action = (prev.get("action") or "").strip()
+        same = action and action == (seg.get("action") or "").strip()
+        meets = abs(float(seg["start_sec"]) - float(prev["end_sec"])) <= 1e-3
+        at_cut = round(float(prev["end_sec"]), 3) in cuts
+        if same and meets and at_cut:
+            prev["end_sec"] = max(float(prev["end_sec"]), float(seg["end_sec"]))
+            continue
+        merged.append(dict(seg))
+    return merged
+
+
 def shift_segments(segments, offset):
     shifted = []
     for seg in segments:
@@ -485,7 +501,7 @@ def assign_ids_and_frames(segments, fps):
     return numbered
 
 
-def annotate_video(video, out_dir, client, model, prompt_file, clip_sec, temperature, instruction, scene_prompt_file=DEFAULT_SCENE_PROMPT):
+def annotate_video(video, out_dir, client, model, prompt_file, clip_sec, temperature, instruction, scene_prompt_file=DEFAULT_SCENE_PROMPT, reference_for_clip=None, quantize_step=0.0):
     video = Path(video)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -519,7 +535,12 @@ def annotate_video(video, out_dir, client, model, prompt_file, clip_sec, tempera
         frames = extract_clip_frames(video, t0, t1, tw, th)
         sheets = save_sheets(frames, sheet_dir)
         local_dur = t1 - t0
-        prompt = load_prompt(prompt_file, local_dur, len(sheets), instruction=instruction)
+        clip_instruction = instruction
+        if reference_for_clip is not None:
+            reference = reference_for_clip(t0, t1)
+            if reference:
+                clip_instruction = f"{instruction}\n{reference}".strip() if instruction else reference
+        prompt = load_prompt(prompt_file, local_dur, len(sheets), instruction=clip_instruction)
         local = ask_gemini(client, model, sheet_messages(prompt, sheets), temperature)
         local = stitch(local, local_dur)
         shifted = shift_segments(local, t0)
@@ -547,7 +568,14 @@ def annotate_video(video, out_dir, client, model, prompt_file, clip_sec, tempera
             flush=True,
         )
 
+    if quantize_step:
+        from pipelines.caption.finebio_reference import assert_time_order, quantize_segments
+        shifted_all = quantize_segments(shifted_all, duration, quantize_step)
+    boundaries = [end for _, end in windows[:-1]]
+    shifted_all = merge_clip_edges(shifted_all, boundaries)
     segments = assign_ids_and_frames(stitch(shifted_all, duration), fps)
+    if quantize_step:
+        assert_time_order(segments)
     for seg in segments:
         seg["scene"] = scene
     result = {
@@ -568,7 +596,19 @@ def annotate_video(video, out_dir, client, model, prompt_file, clip_sec, tempera
         json.dumps(annotation, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    discard_caption_scratch(out_dir)
     return result
+
+
+def discard_caption_scratch(out_dir):
+    """Keep the viewer JSON. Drop contact sheets and per-clip dumps."""
+    out_dir = Path(out_dir)
+    for name in ("scene_frames", "sheets", "clips.json", "segments.json"):
+        path = out_dir / name
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
 
 
 def main():

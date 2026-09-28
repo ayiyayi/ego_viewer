@@ -1,0 +1,7 @@
+# SAM3 runtime; torch wheels are installed from the official cu128 index first.
+torch==2.10.0
+torchvision==0.25.0
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+# The upstream model builder imports pkg_resources.
+setuptools==80.9.0

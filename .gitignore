@@ -4,3 +4,19 @@ datapipe_workflow/pipelines/caption/api_config.json
 **/.cache/
 **/*.incomplete
 *.dpc*
+draft.txt
+hand_test_videos/
+tmp/
+WiLoR_SAM_Camera_World_MANO/
+finebio_camera_poses/
+tests/
+hermai_samples/
+
+# Earlier experiments and reference checkouts. The delivered viewer set is datapipe_workflow/examples.
+datapipe_workflow/examples_bak/
+HandActionData/
+HANDOFF_HAND_POSE.md
+datapipe_workflow/pipelines/finebio/
+datapipe_workflow/scripts/import_classmate_wilor_sam.py
+datapipe_workflow/env_profiles/sam3-installed.txt
+datapipe_workflow/env_profiles/sam3-validation.json

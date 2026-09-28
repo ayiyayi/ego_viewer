@@ -1,6 +1,6 @@
 # Ego Viewer 交接
 
-可以主要改可视化页面。三个样例的视频、动作标注、手和相机都已经导出，打开页面就能用，不需要再配 HaWoR、标注 API。
+可以主要改可视化页面。手、相机和动作标注都已经导出，打开页面就能用。
 
 ## 当前页面
 
@@ -23,13 +23,16 @@ python3 serve_v7.py
 
 ## 现成数据
 
-页面自动读取 `datapipe_workflow/examples/` 下每个带 `input/*.mp4` 的目录。现在有三份，标注和 3D 手都已就绪：
+页面自动读取 `datapipe_workflow/examples/` 下每个带 `input/*.mp4` 的目录。现在是这六条，都有 3D 手和动作标注：
 
 | 目录 | 视频 | 内容 |
 |---|---|---|
-| `examples/pick_up_box` | `input/93009_1min.mp4` | 客厅，拿放物品 |
-| `examples/return_portafilter` | `input/return_portafilter.mp4` | 厨房，咖啡机手柄 |
-| `examples/load_drawstring_bag` | `input/file-000.mp4` | 卧室，抽绳袋，36 fps |
+| `examples/P03_05_02` | `input/P03_05_02.mp4` | FineBio，约 30 fps，做过遮挡和短空档插值。动作标注参考了人工细粒度标签 |
+| `examples/P10_01_01` | `input/P10_01_01.mp4` | 同上 |
+| `examples/P20_03_01` | `input/P20_03_01.mp4` | 同上 |
+| `examples/P22_02_02` | `input/P22_02_02.mp4` | 同上 |
+| `examples/P28_01_01` | `input/P28_01_01.mp4` | 同上 |
+| `examples/file-000` | `input/file-000.mp4` | 1920×1080，约 60 fps，只做了遮挡，没有插值。没有人工标签，动作标注只看画面 |
 
 每个样例的页面会用到这些文件：
 
@@ -40,28 +43,44 @@ output/keypoints.npz
 output/mesh.bin
 ```
 
-`ego_action_annotation.json` 是一个数组。每段有 `id`、`start_ts`、`end_ts`、`start_frame`、`end_frame`、`scene`、`verb`、`object`、`action`。
+`ego_action_annotation.json` 是一个数组。每段有 `id`、`start_ts`、`end_ts`、`start_frame`、`end_frame`、`scene`、`verb`、`object`、`action`。`id` 从 1 连续编号。`start_frame` / `end_frame` 是 `round(秒 × fps)`，fps 在同目录的 `provenance.json`。手改时间或删段之后，要重排 `id` 并按这个式子重算帧号。
 
 World Frame 画的是 `keypoints.npz` 和旁边的 `mesh.bin`，不是原始的 `hands.npz`。`keypoints.npz` 里页面用到的字段是 `joints_world`（2 只手 × 帧 × 21 个关节点）、`cam_pos`、`cam_R`、`width`、`height`、`fps`。没有这两份文件时，World Frame 会停在 “awaiting model output”。
 
-`viewer/samples.json` 里还有一份官方样例，路径在本项目外面。改页面时用上面三个 `examples` 即可。
+`viewer/samples.json` 里还有一份官方样例，路径在本项目外面。改页面时用上面的 `examples` 即可。
 
-## 标注是怎么来的
+## 这次的手部方案
 
-只在需要重新标注新视频时才看这一节。看页面、改样式不用跑这些。
+看页面不用跑模型。要重新处理一条视频时，默认路径是：
 
-| 内容 | 模型 | 代码 |
-|---|---|---|
-| 动作分段、动词、物体、句子，以及整段视频的场景 | Gemini API（`pipelines/caption/api_config.json` 里的模型） | `pipelines/caption/atomic_subtask_demo.py` |
-| 手部姿态和相机轨迹 | HaWoR（手部重建 + SLAM 相机） | `pipelines/hawor/` |
-| 页面上的 21 点骨架和手部网格 | 用 MANO 从 HaWoR 的 `hands.npz` 算出 `keypoints.npz` 和 `mesh.bin` | `viewer/export_keypoints.py` |
+1. **SAM** 跟踪左右手框。
+2. **HaWoR** 只用来估计相机轨迹。1920×1080 用焦距 1000.1，其他分辨率用 600。
+3. **WiLoR** 在这条轨迹上估计双手姿态，写成 `keypoints.npz` 和 `mesh.bin`。
+4. **后处理**：手腕快于 1.5 m/s 的帧遮掉；相机快于 2.4 m/s 就切断轨迹。只有短于 1/6 秒、两端手腕距离不超过 0.10 m、补帧速度不超过 1.5 m/s、手指姿态相差不超过 0.03 m 的空档才插值。被遮掉的检测不会再补上。阈值按速度和时间写，不按帧数。
 
-统一入口是 `datapipe_workflow/annotate_video.py`。在该目录下：
+入口是 `datapipe_workflow/annotate_video.py`。在该目录下：
 
 ```bash
-python annotate_video.py /path/to/video.mp4 --output examples/my_clip
+python annotate_video.py /path/to/video.mp4 --hands-only --output examples/my_clip
 ```
 
-它会调用 API 写动作标注，再跑 HaWoR，并导出网页用的 `keypoints.npz` 和 `mesh.bin`。HaWoR 使用 `env_profiles/default.yaml` 里的 Python：`/data/heyuping/ego_viewer/envs/hawor/bin/python`，GPU 0。抽帧按源视频帧率逐帧进行，不再降到固定 30 fps。
+SAM 路径在 `env_profiles/sam3.env`，脚本会自己读。HaWoR / WiLoR 用 `/data/heyuping/ego_viewer/envs/` 里对应的 Python，GPU 0。`--hands hawor` 才改回 HaWoR 自己的手，那条路径不做上面的后处理。
 
-API 密钥已经在 `pipelines/caption/api_config.json`，不要把密钥写进页面或提交到仓库。
+上面五条 `P*` 是按更早的 30 fps 帧规则导出的；`file-000` 只做了遮挡。新跑的视频才会走现在这套速度和时间规则。
+
+## 动作标注
+
+Gemini 把视频切成 20 秒一段，每 0.5 秒一帧做成接触图，再拼成 `ego_action_annotation.json`。接触图、`clips.json`、`segments.json` 跑完就删，样例目录里不留这些中间文件。密钥在 `pipelines/caption/api_config.json`，不要写进页面或提交到仓库。
+
+五条 FineBio 用 `/data-hyp/ego_viewer/tmp/<视频名>.txt` 作参考，例如 `tmp/P03_05_02.txt`。文件前半是粗粒度任务，时钟突然降到 0 附近之后才是细粒度动作。模型只看细粒度行。同一时间左右手各有一条时只留主动作。时间先对齐到 0.5 秒，再检查顺序。参考可以漏原子动作，模型可以按画面补上。`file-000` 没有这份人工文件，所以不加 `--labels`。
+
+只重跑动作、不动手和相机：
+
+```bash
+cd /data-hyp/ego_viewer/datapipe_workflow
+python annotate_video.py examples/P03_05_02/input/P03_05_02.mp4 \
+  --actions-only --labels /data-hyp/ego_viewer/tmp/P03_05_02.txt \
+  --output examples/P03_05_02
+```
+
+代码在 `pipelines/caption/atomic_subtask_demo.py`，FineBio 参考的整理在 `pipelines/caption/finebio_reference.py`。提示词在 `pipelines/caption/prompts/atomic_subtask_clip.txt`。其中约定：单纯完成插枪头这类操作的按压，并进那个具体动作，不要单独写成 Presses。相邻两段切点上的 action 全文相同就合并成一段。

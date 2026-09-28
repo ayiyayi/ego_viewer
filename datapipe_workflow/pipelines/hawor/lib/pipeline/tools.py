@@ -4,10 +4,17 @@ import joblib
 from tqdm import tqdm
 import numpy as np
 import torch
+import sys
+from pathlib import Path
 from hawor.utils.process import run_mano, run_mano_left
 
 from lib.eval_utils.custom_utils import cam_to_img, load_gt_cam
 from ultralytics import YOLO
+
+_PIPELINE_ROOT = Path(__file__).resolve().parents[4]
+if str(_PIPELINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PIPELINE_ROOT))
+from pipelines.hand_association import ContinuityAssociator
 
 
 if torch.cuda.is_available():
@@ -29,50 +36,41 @@ def detect_track(imgfiles, thresh=0.5):
     # Run
     boxes_ = []
     tracks = {}
+    associator = ContinuityAssociator()
     for t, imgpath in enumerate(tqdm(imgfiles)):
         img_cv2 = cv2.imread(imgpath)
 
         ### --- Detection ---
         with torch.no_grad():
             with autocast():
-                results = hand_det_model.track(img_cv2, conf=thresh, persist=True, verbose=False)
+                results = hand_det_model.predict(img_cv2, conf=thresh, verbose=False)
                 
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 confs = results[0].boxes.conf.cpu().numpy()
                 handedness = results[0].boxes.cls.cpu().numpy()
-                if not results[0].boxes.id is None:
-                    track_id = results[0].boxes.id.cpu().numpy()
-                else:
-                    track_id = [-1] * len(boxes)
-
-                boxes = np.hstack([boxes, confs[:, None]])
-                find_right = False
-                find_left = False
+                candidates = {0: [], 1: []}
                 for idx, box in enumerate(boxes):
-                    if track_id[idx] == -1:
-                        if handedness[[idx]] > 0:
-                            id = int(10000)
-                        else:
-                            id = int(5000)
-                    else:
-                        id = track_id[idx]
-                    subj = dict()
-                    subj['frame'] = t 
-                    subj['det'] = True
-                    subj['det_box'] = boxes[[idx]]
-                    subj['det_handedness'] = handedness[[idx]]
-                    
-                    
-                    if (not find_right and handedness[[idx]] > 0) or (not find_left and handedness[[idx]]==0):
-                        if id in tracks:
-                            tracks[id].append(subj)
-                        else:
-                            tracks[id] = [subj]
-
-                        if handedness[[idx]] > 0:
-                            find_right = True
-                        elif handedness[[idx]] == 0:
-                            find_left = True
+                    side = int(handedness[idx])
+                    if side not in candidates:
+                        continue
+                    b = box.astype(np.float32)
+                    candidates[side].append({
+                        'box': b,
+                        'score': float(confs[idx]),
+                        'area': float(max(0., b[2]-b[0]) * max(0., b[3]-b[1])),
+                    })
+                selected = associator.update(candidates, img_cv2.shape)
+                for side, chosen in selected.items():
+                    if chosen is None:
+                        continue
+                    id = 5000 if int(side) == 0 else 10000
+                    subj = {
+                        'frame': t,
+                        'det': True,
+                        'det_box': np.asarray([[*chosen['box'], chosen['score']]], dtype=np.float32),
+                        'det_handedness': np.asarray([side]),
+                    }
+                    tracks.setdefault(id, []).append(subj)
     tracks = np.array(tracks, dtype=object)
     boxes_ = np.array(boxes_, dtype=object)
 

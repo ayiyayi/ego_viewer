@@ -60,7 +60,10 @@
     duration: 0,
     shownKey: "",
     blockId: "",
+    windowStart: 0,
+    windowPinned: false,
   };
+  const WINDOW_SEC = 30;
   let loadToken = 0;
 
   function decode(b64, Ctor) {
@@ -100,7 +103,10 @@
   }
 
   function videoName(sample) {
-    return sample.title || sample.id;
+    const title = sample.title || sample.id;
+    const shared = state.samples.filter((item) => (item.title || item.id) === title).length > 1;
+    if (shared && sample.id !== title) return sample.id;
+    return title;
   }
 
   async function boot() {
@@ -170,6 +176,7 @@
     timeline.addEventListener("pointerdown", scrub);
     track.addEventListener("pointermove", showTip);
     track.addEventListener("pointerleave", () => tipEl.classList.remove("on"));
+    timeline.addEventListener("wheel", slideWindow, { passive: false });
 
     window.addEventListener("resize", () => {
       fitFrame();
@@ -209,6 +216,8 @@
     state.worldStamp = "";
     state.shownKey = "";
     state.blockId = "";
+    state.windowStart = 0;
+    state.windowPinned = false;
 
     if (sampleSelect.value !== id) sampleSelect.value = id;
     veil.classList.add("on");
@@ -292,29 +301,86 @@
     )).join("");
   }
 
-  // Adaptive ruler: aims for ~8-12 major ticks whatever the clip length.
+  function windowSpan() {
+    const duration = state.duration || 0;
+    if (duration <= 0) return WINDOW_SEC;
+    return Math.min(WINDOW_SEC, duration);
+  }
+
+  function clampWindow(start) {
+    const duration = state.duration || 0;
+    const span = windowSpan();
+    return Math.max(0, Math.min(Math.max(0, duration - span), start));
+  }
+
+  // Slide the 30s window so the playhead sits about a third of the way across.
+  // A wheel scroll or a drag pins the window until playback leaves it.
+  // Returns whether the ruler should be redrawn.
+  function followWindow(time) {
+    const span = windowSpan();
+    const start = state.windowStart || 0;
+    if (state.windowPinned) {
+      const inside = time >= start - 1e-3 && time <= start + span + 1e-3;
+      if (inside) return false;
+      state.windowPinned = false;
+    }
+    const next = clampWindow(time - span / 3);
+    if (Math.abs(next - start) < 1e-4) return false;
+    state.windowStart = next;
+    return Math.abs(next - start) >= 0.25;
+  }
+
+  function syncStrip() {
+    const duration = state.duration || 1;
+    const span = windowSpan();
+    const width = `${(duration / span) * 100}%`;
+    const shift = duration > 0 ? -((state.windowStart || 0) / duration) * 100 : 0;
+    const transform = `translateX(${shift}%)`;
+    for (const id of ["track-strip", "ruler-strip"]) {
+      const strip = document.getElementById(id);
+      if (!strip) continue;
+      strip.style.width = width;
+      strip.style.transform = transform;
+    }
+  }
+
+  function timeAtRatio(ratio) {
+    const start = state.windowStart || 0;
+    return Math.max(0, Math.min(state.duration || 0, start + ratio * windowSpan()));
+  }
+
+  function slideWindow(event) {
+    if ((state.duration || 0) <= WINDOW_SEC) return;
+    event.preventDefault();
+    const step = event.deltaY > 0 || event.deltaX > 0 ? 5 : -5;
+    state.windowStart = clampWindow((state.windowStart || 0) + step);
+    state.windowPinned = true;
+    syncStrip();
+    paint(false);
+  }
+
+  // Ticks span the whole clip and slide with the 30s window, same shift as the blocks.
   function renderRuler() {
     const duration = state.duration;
     if (!duration) { rulerEl.innerHTML = ""; return; }
-    const candidates = [1, 2, 5, 10, 15, 30, 60, 120, 300];
-    const major = candidates.find((s) => duration / s <= 12) || 600;
+    const span = windowSpan();
+    const major = span > 15 ? 5 : 2;
     const minor = major / 5;
     let html = "";
     for (let t = 0; t <= duration + 1e-6; t += minor) {
       const pct = (t / duration) * 100;
       if (pct > 100) break;
-      const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
+      const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-4;
       html += `<i class="${isMajor ? "major" : ""}" style="left:${pct}%"></i>`;
       if (isMajor) {
-        // Labels are centre-anchored, so pin the first and last to the ends
-        // instead of letting them hang off the edge of the ruler.
-        const edge = pct < 1
+        const edge = pct < 0.4
           ? "left:0;transform:none"
-          : (pct > 99 ? "right:0;left:auto;transform:none" : `left:${pct}%`);
+          : (pct > 99.6 ? "right:0;left:auto;transform:none" : `left:${pct}%`);
         html += `<b style="${edge}">${fmtShort(t)}</b>`;
       }
     }
-    rulerEl.innerHTML = html;
+    rulerEl.innerHTML = `<div class="ruler-strip" id="ruler-strip">${html}</div>`;
+    syncStrip();
   }
 
   function fmtShort(seconds) {
@@ -327,7 +393,7 @@
   function showTip(event) {
     const rect = track.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const time = ratio * (state.duration || 0);
+    const time = timeAtRatio(ratio);
     const segment = state.segments.length ? currentSegment(time) : null;
     if (!segment) { tipEl.classList.remove("on"); return; }
     const action = actionLabel(segment);
@@ -517,19 +583,21 @@
 
   function renderTimeline() {
     const duration = state.duration || 1;
-    track.innerHTML = state.segments.map((segment, index) => {
+    const blocks = state.segments.map((segment, index) => {
       const start = num(segment.start_ts);
       const end = num(segment.end_ts);
       const left = (start / duration) * 100;
-      const width = Math.max(0.4, ((end - start) / duration) * 100);
+      const width = ((end - start) / duration) * 100;
       const action = actionLabel(segment);
       const label = action.action || "";
       const title = label ? ` title="${escapeHtml(label)}"` : "";
       const color = BLOCKS[index % BLOCKS.length];
       return `<div class="block" data-id="${escapeHtml(segment.id)}" data-t="${start}"${title} style="left:${left}%;width:${width}%;background:linear-gradient(180deg,${color},${color}d9)">${escapeHtml(label)}</div>`;
     }).join("");
+    track.innerHTML = `<div class="track-strip" id="track-strip">${blocks}</div>`;
     track.classList.toggle("empty", state.segments.length === 0);
     state.blockId = "";
+    syncStrip();
   }
 
   // Outlines the block under the playhead so the timeline and the annotation
@@ -545,13 +613,15 @@
   }
 
   function scrub(event) {
-    const rect = track.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    video.currentTime = ratio * (state.duration || 0);
+    const ratioOf = (ev) => {
+      const rect = track.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+    };
+    state.windowPinned = true;
+    video.currentTime = timeAtRatio(ratioOf(event));
     timeline.classList.add("scrubbing");
     const move = (ev) => {
-      const next = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-      video.currentTime = next * (state.duration || 0);
+      video.currentTime = timeAtRatio(ratioOf(ev));
     };
     const up = () => {
       timeline.classList.remove("scrubbing");
@@ -870,17 +940,27 @@
     for (let hand = 0; hand < 2; hand += 1) {
       wctx.strokeStyle = HAND_TRAIL[hand];
       wctx.lineWidth = 1.5;
-      wctx.beginPath();
-      let started = false;
+      // One line per hand. After a masked frame the trail stops; the piece
+      // that would start again later is not drawn.
+      let runStart = -1;
+      let runEnd = -1;
       for (let i = trailStart; i <= frame; i += 1) {
-        if (!validAt(hand, i)) continue;
-        const [u, v] = projectWorld(jointWorld(hand, i, 0));
-        if (!started) {
-          wctx.moveTo(u, v);
-          started = true;
-        } else wctx.lineTo(u, v);
+        if (!validAt(hand, i)) {
+          if (runStart !== -1) break;
+          continue;
+        }
+        if (runStart === -1) runStart = i;
+        runEnd = i;
       }
-      wctx.stroke();
+      if (runStart !== -1) {
+        wctx.beginPath();
+        for (let i = runStart; i <= runEnd; i += 1) {
+          const [u, v] = projectWorld(jointWorld(hand, i, 0));
+          if (i === runStart) wctx.moveTo(u, v);
+          else wctx.lineTo(u, v);
+        }
+        wctx.stroke();
+      }
       if (!validAt(hand, frame)) continue;
       const points = [];
       for (let joint = 0; joint < 21; joint += 1) points.push(projectWorld(jointWorld(hand, frame, joint)));
@@ -925,7 +1005,11 @@
     const time = video.currentTime || 0;
     state.duration = video.duration || state.duration;
     clock.textContent = `${fmt(time)} / ${fmt(state.duration)}`;
-    const ratio = state.duration ? time / state.duration : 0;
+    followWindow(time);
+    syncStrip();
+    const span = windowSpan();
+    const raw = span ? (time - (state.windowStart || 0)) / span : 0;
+    const ratio = Math.max(0, Math.min(1, raw));
     const trackRect = track.getBoundingClientRect();
     const hostRect = timeline.getBoundingClientRect();
     playhead.style.left = `${trackRect.left - hostRect.left + ratio * trackRect.width}px`;

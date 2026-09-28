@@ -76,7 +76,10 @@ def hawor_slam(args, start_idx, end_idx):
         except:
             
             print('No focal length provided')
-            focal = 600
+            image = cv2.imread(imgfiles[0])
+            height, width = image.shape[:2]
+            # Match hawor_video.default_img_focal. 1920x1080 uses Hermai's 1000.1.
+            focal = 1000.1 if width == 1920 and height == 1080 else 600.0
             with open(os.path.join(video_folder, 'est_focal.txt'), 'w') as file:
                 file.write(str(focal))
     calib = np.array(est_calib(imgfiles)) # [focal, focal, cx, cy]

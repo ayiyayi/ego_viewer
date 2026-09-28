@@ -20,6 +20,22 @@ from hawor.utils.process import get_mano_faces, run_mano, run_mano_left
 from hawor.utils.rotation import angle_axis_to_rotation_matrix, rotation_matrix_to_angle_axis
 from infiller.lib.model.network import TransformerModel
 
+def default_img_focal(image_path):
+    """Focal used when the caller did not pass one.
+
+    Hermai's 1920x1080 clips were fitted with an assumed pinhole focal of
+    1000.1 px. 600 px is the historical HaWoR default and is about 116 degrees
+    horizontal at that resolution. Other resolutions keep 600.
+    """
+    image = cv2.imread(str(image_path))
+    if image is None:
+        return 600.0
+    height, width = image.shape[:2]
+    if width == 1920 and height == 1080:
+        return 1000.1
+    return 600.0
+
+
 def load_hawor(checkpoint_path):
     from pathlib import Path
     from hawor.configs import get_config
@@ -58,7 +74,7 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
                 img_focal = file.read()
                 img_focal = float(img_focal)
         except:
-            img_focal = 600
+            img_focal = default_img_focal(imgfiles[0])
             print(f'No focal length provided, use default {img_focal}')
             with open(os.path.join(seq_folder, 'est_focal.txt'), 'w') as file:
                 file.write(str(img_focal))
@@ -76,6 +92,8 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     right_trk = []
     for k, idx in enumerate(tid):
         trk = tracks[idx]
+        if not trk:
+            continue
 
         valid = np.array([t['det'] for t in trk])        
         is_right = np.concatenate([t['det_handedness'] for t in trk])[valid]
@@ -86,6 +104,10 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
             right_trk.extend(trk)
     left_trk = sorted(left_trk, key=lambda x: x['frame'])
     right_trk = sorted(right_trk, key=lambda x: x['frame'])
+    for name, track in [('left', left_trk), ('right', right_trk)]:
+        frames = [r['frame'] for r in track]
+        if len(frames) != len(set(frames)):
+            raise ValueError(f'Overlapping {name} tracks in cache; rerun detection in a fresh work directory')
     final_tracks = {
         0: left_trk,
         1: right_trk

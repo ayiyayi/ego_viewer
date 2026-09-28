@@ -47,6 +47,10 @@ From this directory, pass one video. API settings come from `pipelines/caption/a
 
 ```bash
 python annotate_video.py /path/to/video.mp4 --output examples/my_clip
+python annotate_video.py /path/to/video.mp4 --hands-only --output examples/my_clip
+python annotate_video.py /path/to/video.mp4 --actions-only --labels /path/to/labels.txt --output examples/my_clip
 ```
 
-The result is `input/<video>.mp4`, `output/ego_action_annotation.json`, `output/ego_process/ego_hands_reconstruction/hands.npz`, plus `output/keypoints.npz` and `output/mesh.bin` for the viewer.
+`--hands-only` skips action labels. `--actions-only` skips the hand models. `--labels` is a FineBio human CSV used as a reference; omit it when the video has no human annotation. Contact sheets are deleted after the run.
+
+The viewer files are `input/<video>.mp4`, `output/ego_action_annotation.json`, `output/keypoints.npz`, and `output/mesh.bin`.

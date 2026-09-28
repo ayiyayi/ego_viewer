@@ -8,6 +8,9 @@ from glob import glob
 from lib.pipeline.tools import detect_track
 from natsort import natsorted
 import subprocess
+from pathlib import Path
+import cv2
+from pipelines.sam3_hand_tracking.refine import environment_config, refine_boxes_with_sam3, save_box_archive
 
 
 def probe_video_rate(video_path):
@@ -49,6 +52,7 @@ def extract_frames(video_path, output_folder):
 
 
 def detect_track_video(args):
+    sam_config = environment_config()
     file = args.video_path
     root = os.path.dirname(file)
     seq = os.path.basename(file).split('.')[0]
@@ -68,18 +72,44 @@ def detect_track_video(args):
         _ = extract_frames(file, img_folder)
     imgfiles = natsorted(glob(f'{img_folder}/*.jpg'))
 
+    if sam_config and os.path.exists(f"{seq_folder}/tracks_0_{len(imgfiles)}/frame_chunks_all.npy"):
+        raise ValueError("SAM3 needs a fresh work directory; existing pose cache would ignore new boxes")
+
     ##### Detection + Track #####
     print('Detect and Track ...')
 
     start_idx = 0
     end_idx = len(imgfiles)
 
-    if os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_boxes.npy'):
+    if not sam_config and os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_boxes.npy'):
         print(f"skip track for {start_idx}_{end_idx}")
         return start_idx, end_idx, seq_folder, imgfiles
     os.makedirs(f"{seq_folder}/tracks_{start_idx}_{end_idx}", exist_ok=True)
     # boxes_, tracks_ = detect_track(imgfiles, thresh=0.2)
-    boxes_, tracks_ = detect_track(imgfiles, thresh=0.3)
+    boxes_, tracks_ = detect_track(imgfiles, thresh=0.2 if sam_config else 0.3)
+    if sam_config:
+        raw = [{0: None, 1: None} for _ in imgfiles]
+        for track in tracks_.item().values():
+            for record in track:
+                side = int(record['det_handedness'][0])
+                b = record['det_box'][0]
+                raw[record['frame']][side] = {'box': b[:4], 'score': float(b[4])}
+        import torch
+        torch.cuda.empty_cache()
+        rate, _ = probe_video_rate(file)
+        from fractions import Fraction
+        rows = refine_boxes_with_sam3(Path(img_folder), raw, Path(seq_folder) / '_sam3',
+                                      fps=float(Fraction(rate)), **sam_config)
+        h, w = cv2.imread(imgfiles[0]).shape[:2]
+        save_box_archive(Path(seq_folder) / 'sam_boxes.npz', rows, w, h)
+        tracks = {}
+        for t, row in enumerate(rows):
+            for side, box in row.items():
+                if box is not None:
+                    tracks.setdefault(side, []).append({'frame': t, 'det': True,
+                        'det_box': np.asarray([[*box, 1.0]], dtype=np.float32),
+                        'det_handedness': np.asarray([side])})
+        tracks_ = np.array(tracks, dtype=object)
     np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_boxes.npy', boxes_)
     np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_tracks.npy', tracks_)
 

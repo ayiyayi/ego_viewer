@@ -1,0 +1,41 @@
+{
+  "sample_id": "file-000_wilor_sam_masked",
+  "source_sample": "/data-hyp/ego_viewer/datapipe_workflow/examples/file-000_wilor_sam",
+  "video": "/data-hyp/ego_viewer/hermai_samples/videos/observation.images.ego/chunk-000/file-000.mp4",
+  "fps": 59.940059661865234,
+  "frames": 3960,
+  "interpolation": "none",
+  "reference_fps": 30.0,
+  "rules": [
+    "Camera speed above 2.4 m/s breaks the track. That is the old 0.08 m per frame at 30 fps. Wrists are not compared across that break.",
+    "Inside a continuous camera segment, a wrist moving faster than 1.5 m/s is abnormal. If the previous hand returns within 3.0 s at an average speed of at most 1.5 m/s, the frames in between stay masked. 3.0 s is the old 90-frame window at 30 fps.",
+    "No centimeter step and no frame-count window. No interpolation."
+  ],
+  "wrist_speed_m_s": 1.5,
+  "camera_speed_m_s": 2.4,
+  "return_window_s": 3.0,
+  "camera_breaks": 146,
+  "left": {
+    "original": 2602,
+    "kept": 1490,
+    "masked": 1112,
+    "interpolated": 0,
+    "final": 1490,
+    "adjacent_speed_max_m_s": 1.4966342167745665,
+    "adjacent_over_1_5": 0
+  },
+  "right": {
+    "original": 3536,
+    "kept": 2206,
+    "masked": 1330,
+    "interpolated": 0,
+    "final": 2206,
+    "adjacent_speed_max_m_s": 1.4981678008095969,
+    "adjacent_over_1_5": 0
+  },
+  "preview_frame": 2142,
+  "did_not_overwrite": [
+    "/data-hyp/ego_viewer/datapipe_workflow/examples/file-000_wilor_sam",
+    "/data/heyuping/ego_viewer/stable/file-000_wilor_sam_stable"
+  ]
+}

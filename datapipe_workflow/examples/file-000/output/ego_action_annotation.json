@@ -1,0 +1,211 @@
+[
+  {
+    "id": 1,
+    "start_ts": 0.0,
+    "end_ts": 2.0,
+    "start_frame": 0,
+    "end_frame": 120,
+    "scene": "factory",
+    "verb": "Moves",
+    "object": "plastic cover",
+    "action": "Moves the plastic cover."
+  },
+  {
+    "id": 2,
+    "start_ts": 2.0,
+    "end_ts": 3.0,
+    "start_frame": 120,
+    "end_frame": 180,
+    "scene": "factory",
+    "verb": "Picks up",
+    "object": "plastic clip",
+    "action": "Picks up the plastic clip."
+  },
+  {
+    "id": 3,
+    "start_ts": 3.0,
+    "end_ts": 5.5,
+    "start_frame": 180,
+    "end_frame": 330,
+    "scene": "factory",
+    "verb": "places",
+    "object": "plastic clip",
+    "action": "Places the plastic clip."
+  },
+  {
+    "id": 4,
+    "start_ts": 5.5,
+    "end_ts": 20.0,
+    "start_frame": 330,
+    "end_frame": 1199,
+    "scene": "factory",
+    "verb": "Rotates",
+    "object": "plastic cover",
+    "action": "Rotates the plastic cover."
+  },
+  {
+    "id": 5,
+    "start_ts": 20.0,
+    "end_ts": 21.5,
+    "start_frame": 1199,
+    "end_frame": 1289,
+    "scene": "factory",
+    "verb": "Places",
+    "object": "plastic panel",
+    "action": "Places the plastic panel."
+  },
+  {
+    "id": 6,
+    "start_ts": 21.5,
+    "end_ts": 25.0,
+    "start_frame": 1289,
+    "end_frame": 1499,
+    "scene": "factory",
+    "verb": "Picks up",
+    "object": "cutter",
+    "action": "Picks up the cutter."
+  },
+  {
+    "id": 7,
+    "start_ts": 25.0,
+    "end_ts": 31.0,
+    "start_frame": 1499,
+    "end_frame": 1858,
+    "scene": "factory",
+    "verb": "Cuts",
+    "object": "plastic panel",
+    "action": "Cuts the plastic panel."
+  },
+  {
+    "id": 8,
+    "start_ts": 31.0,
+    "end_ts": 33.0,
+    "start_frame": 1858,
+    "end_frame": 1978,
+    "scene": "factory",
+    "verb": "Rotates",
+    "object": "plastic panel",
+    "action": "Rotates the plastic panel."
+  },
+  {
+    "id": 9,
+    "start_ts": 33.0,
+    "end_ts": 38.0,
+    "start_frame": 1978,
+    "end_frame": 2278,
+    "scene": "factory",
+    "verb": "Cuts",
+    "object": "plastic panel",
+    "action": "Cuts the plastic panel."
+  },
+  {
+    "id": 10,
+    "start_ts": 38.0,
+    "end_ts": 40.0,
+    "start_frame": 2278,
+    "end_frame": 2398,
+    "scene": "factory",
+    "verb": "Idle",
+    "object": "",
+    "action": "Idle."
+  },
+  {
+    "id": 11,
+    "start_ts": 40.0,
+    "end_ts": 43.5,
+    "start_frame": 2398,
+    "end_frame": 2607,
+    "scene": "factory",
+    "verb": "Places",
+    "object": "white panel",
+    "action": "Places the white panel."
+  },
+  {
+    "id": 12,
+    "start_ts": 43.5,
+    "end_ts": 47.5,
+    "start_frame": 2607,
+    "end_frame": 2847,
+    "scene": "factory",
+    "verb": "Pulls",
+    "object": "plastic film",
+    "action": "Pulls the plastic film over the white panel."
+  },
+  {
+    "id": 13,
+    "start_ts": 47.5,
+    "end_ts": 50.0,
+    "start_frame": 2847,
+    "end_frame": 2997,
+    "scene": "factory",
+    "verb": "Presses",
+    "object": "plastic film",
+    "action": "Presses the plastic film onto the white panel."
+  },
+  {
+    "id": 14,
+    "start_ts": 50.0,
+    "end_ts": 51.0,
+    "start_frame": 2997,
+    "end_frame": 3057,
+    "scene": "factory",
+    "verb": "Cuts",
+    "object": "plastic film",
+    "action": "Cuts the plastic film."
+  },
+  {
+    "id": 15,
+    "start_ts": 51.0,
+    "end_ts": 53.0,
+    "start_frame": 3057,
+    "end_frame": 3177,
+    "scene": "factory",
+    "verb": "Flips",
+    "object": "white panel",
+    "action": "Flips the white panel."
+  },
+  {
+    "id": 16,
+    "start_ts": 53.0,
+    "end_ts": 60.0,
+    "start_frame": 3177,
+    "end_frame": 3596,
+    "scene": "factory",
+    "verb": "Folds",
+    "object": "plastic film",
+    "action": "Folds the plastic film onto the white panel."
+  },
+  {
+    "id": 17,
+    "start_ts": 60.0,
+    "end_ts": 61.7,
+    "start_frame": 3596,
+    "end_frame": 3698,
+    "scene": "factory",
+    "verb": "Places",
+    "object": "plastic clip into the cardboard box",
+    "action": "Places plastic clip into the cardboard box."
+  },
+  {
+    "id": 18,
+    "start_ts": 61.7,
+    "end_ts": 65.2,
+    "start_frame": 3698,
+    "end_frame": 3908,
+    "scene": "factory",
+    "verb": "Places",
+    "object": "white foam board into the cardboard box",
+    "action": "Places white foam board into the cardboard box."
+  },
+  {
+    "id": 19,
+    "start_ts": 65.2,
+    "end_ts": 66.066,
+    "start_frame": 3908,
+    "end_frame": 3960,
+    "scene": "factory",
+    "verb": "Idle",
+    "object": "",
+    "action": "Idle."
+  }
+]
