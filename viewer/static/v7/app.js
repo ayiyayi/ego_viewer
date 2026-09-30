@@ -13,6 +13,7 @@
   const clock = document.getElementById("clock");
   const statusEl = document.getElementById("status");
   const worldCaption = document.getElementById("world-caption");
+  const worldNote = document.getElementById("world-note");
   const statsEl = document.getElementById("stats");
   const rulerEl = document.getElementById("ruler");
   const tipEl = document.getElementById("tip");
@@ -26,6 +27,7 @@
   let veilTimer = 0;
   let paintedFrame = -1;
   let lastWorldDraw = 0;
+  let worldDirty = true;
   const octx = overlay.getContext("2d");
   const wctx = world.getContext("2d");
 
@@ -177,13 +179,14 @@
     track.addEventListener("pointermove", showTip);
     track.addEventListener("pointerleave", () => tipEl.classList.remove("on"));
     timeline.addEventListener("wheel", slideWindow, { passive: false });
+    setupWorldControls();
 
     window.addEventListener("resize", () => {
       fitFrame();
       renderRuler();
     });
     window.addEventListener("keydown", (event) => {
-      if (event.target.matches("select")) return;
+      if (event.defaultPrevented || event.target.matches("select, button, input, textarea")) return;
       if (event.code === "Space") {
         event.preventDefault();
         toggle();
@@ -441,6 +444,7 @@
     // Assigning canvas.width blanks the bitmap even when the value is unchanged,
     // so drop the cached stamp or drawWorld would skip the repaint.
     state.worldStamp = "";
+    worldDirty = true;
   }
 
   function frameIndex(time) {
@@ -643,9 +647,13 @@
     return { n, nv, nf, faces, verts };
   }
 
-  const VIEW_R = (() => {
-    const az = 40 * Math.PI / 180;
-    const el = 20 * Math.PI / 180;
+  const DEFAULT_VIEW = { azimuth: 40, elevation: 20, zoom: 1, panX: 0, panY: 0 };
+  const worldView = { ...DEFAULT_VIEW };
+  let viewRotation = worldRotation();
+
+  function worldRotation() {
+    const az = worldView.azimuth * Math.PI / 180;
+    const el = worldView.elevation * Math.PI / 180;
     const ca = Math.cos(az);
     const sa = Math.sin(az);
     const ce = Math.cos(el);
@@ -655,7 +663,90 @@
       se * sa, ce, -se * ca,
       -ce * sa, se, ce * ca,
     ]);
-  })();
+  }
+
+  function invalidateWorldView() {
+    viewRotation = worldRotation();
+    state.worldStamp = "";
+    worldDirty = true;
+    worldNote.textContent = `ortho · az ${Math.round(worldView.azimuth)}° el ${Math.round(worldView.elevation)}°`;
+  }
+
+  function orbitWorld(dx, dy) {
+    worldView.azimuth = ((worldView.azimuth + dx * 0.4) % 360 + 360) % 360;
+    // Stop just short of the poles so dragging never flips the view upside down.
+    worldView.elevation = Math.max(-89, Math.min(89, worldView.elevation + dy * 0.4));
+    invalidateWorldView();
+  }
+
+  function zoomWorld(factor) {
+    worldView.zoom = Math.max(0.2, Math.min(8, worldView.zoom * factor));
+    invalidateWorldView();
+  }
+
+  function resetWorldView() {
+    Object.assign(worldView, DEFAULT_VIEW);
+    invalidateWorldView();
+  }
+
+  function setupWorldControls() {
+    const host = world.parentElement;
+    let drag = null;
+    host.addEventListener("pointerdown", (event) => {
+      if (drag || !event.isPrimary || event.target.closest("button") || ![0, 1, 2].includes(event.button)) return;
+      event.preventDefault();
+      world.focus({ preventScroll: true });
+      drag = { id: event.pointerId, x: event.clientX, y: event.clientY, pan: event.button === 2 };
+      host.setPointerCapture(event.pointerId);
+      host.classList.add("is-dragging");
+    });
+    host.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      if (drag.pan || event.shiftKey) {
+        const rect = world.getBoundingClientRect();
+        worldView.panX += dx / Math.max(1, rect.width);
+        worldView.panY += dy / Math.max(1, rect.height);
+        invalidateWorldView();
+      } else {
+        orbitWorld(dx, dy);
+      }
+    });
+    const endDrag = (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      drag = null;
+      host.classList.remove("is-dragging");
+      if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
+    };
+    host.addEventListener("pointerup", endDrag);
+    host.addEventListener("pointercancel", endDrag);
+    host.addEventListener("lostpointercapture", endDrag);
+    host.addEventListener("contextmenu", (event) => event.preventDefault());
+    host.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? host.clientHeight : 1;
+      const delta = Math.max(-200, Math.min(200, event.deltaY * unit));
+      zoomWorld(Math.exp(-delta * 0.002));
+    }, { passive: false });
+    document.getElementById("world-zoom-in").addEventListener("click", () => zoomWorld(1.25));
+    document.getElementById("world-zoom-out").addEventListener("click", () => zoomWorld(1 / 1.25));
+    document.getElementById("world-reset").addEventListener("click", resetWorldView);
+    world.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft") orbitWorld(-15, 0);
+      else if (event.key === "ArrowRight") orbitWorld(15, 0);
+      else if (event.key === "ArrowUp") orbitWorld(0, -15);
+      else if (event.key === "ArrowDown") orbitWorld(0, 15);
+      else if (event.key === "+" || event.key === "=") zoomWorld(1.25);
+      else if (event.key === "-") zoomWorld(1 / 1.25);
+      else if (event.key === "Home") resetWorldView();
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  }
   const LIGHTS = [
     [0, 10, -15],
     [0, 10, 15],
@@ -680,7 +771,7 @@
     const x = point[0] - center[0];
     const y = point[1] - center[1];
     const z = point[2] - center[2];
-    const r = VIEW_R;
+    const r = viewRotation;
     return [
       r[0] * x + r[1] * y + r[2] * z,
       r[3] * x + r[4] * y + r[5] * z,
@@ -884,9 +975,9 @@
     }
     const center = hands.center;
     const windowM = 0.5;
-    const scale = (1 - 2 * 0.08) * Math.min(width, height) / windowM;
-    const ox = width / 2;
-    const oy = height / 2;
+    const scale = (1 - 2 * 0.08) * Math.min(width, height) / windowM * worldView.zoom;
+    const ox = width * (0.5 + worldView.panX);
+    const oy = height * (0.5 + worldView.panY);
     const projectWorld = (point) => {
       const view = viewPoint(point, center);
       return screenOf(view, scale, ox, oy);
@@ -998,7 +1089,7 @@
       });
     }
 
-    worldCaption.textContent = `~${Math.round(width / scale * 100)}cm view`;
+    worldCaption.textContent = `~${Math.round(width / scale * 100)}cm view · ${worldView.zoom.toFixed(2)}×`;
   }
 
   function paint(drawWorldNow) {
@@ -1029,9 +1120,13 @@
       : Math.floor((video.currentTime || 0) * 30);
     const frameChanged = frame !== paintedFrame;
     if (frame !== paintedFrame) paintedFrame = frame;
-    const drawWorldNow = frameChanged && (video.paused || now - lastWorldDraw > 100);
-    if (drawWorldNow) lastWorldDraw = now;
+    const drawWorldNow = worldDirty || (frameChanged && (video.paused || now - lastWorldDraw > 100));
+    if (drawWorldNow) {
+      lastWorldDraw = now;
+      worldDirty = false;
+    }
     if (frameChanged) paint(drawWorldNow);
+    else if (drawWorldNow) drawWorld(video.currentTime || 0);
     requestAnimationFrame(loop);
   }
   function updateFrameBadge(time) {

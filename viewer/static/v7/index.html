@@ -69,16 +69,22 @@
       <article class="col col-world">
         <header class="col-head">
           <h2><i>03</i>World Frame (3D)</h2>
-          <span class="col-note">ortho · az 40° el 20°</span>
+          <span class="col-note" id="world-note">ortho · az 40° el 20°</span>
         </header>
         <div class="world">
-          <canvas id="world"></canvas>
+          <canvas id="world" tabindex="0" aria-label="Interactive 3D view" aria-describedby="world-help"></canvas>
+          <div class="world-controls" role="group" aria-label="3D view controls">
+            <button id="world-zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
+            <button id="world-zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>
+            <button id="world-reset" type="button" title="Reset angle, zoom and pan (Home)">Reset view</button>
+          </div>
           <div class="world-legend">
             <span><i class="swatch left"></i>left hand</span>
             <span><i class="swatch right"></i>right hand</span>
             <span><i class="swatch cam"></i>camera</span>
           </div>
-          <div class="world-caption" id="world-caption">Follow hands · fixed scale</div>
+          <div class="world-help" id="world-help">Drag to orbit · Scroll to zoom · Shift-drag to pan<span class="sr-only">. Left or middle mouse drag or arrow keys orbit. Right mouse drag also pans. Plus and minus zoom. Home resets the view.</span></div>
+          <div class="world-caption" id="world-caption">Follow hands · 1.00×</div>
         </div>
       </article>
     </section>
