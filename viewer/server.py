@@ -151,6 +151,15 @@ def keypoints_payload(path: Path) -> dict:
         "camZ": b64(cam_z),
         "camR": b64(cam_r),
     }
+    # Optional calibrated projection; legacy exports remain centered pinhole.
+    if "projection_model" in archive:
+        model = str(archive["projection_model"].item())
+        if model != "kb4":
+            raise ValueError(f"Unsupported camera projection: {model}")
+        intrinsics = np.asarray(archive["projection_intrinsics"], dtype=float)
+        if intrinsics.shape != (8,) or not np.isfinite(intrinsics).all():
+            raise ValueError("KB4 requires fx,fy,cx,cy,k1,k2,k3,k4")
+        payload["projection"] = {"model": model, "intrinsics": intrinsics.tolist()}
     _KEYPOINT_CACHE[key] = (path.stat().st_mtime, payload)
     return payload
 

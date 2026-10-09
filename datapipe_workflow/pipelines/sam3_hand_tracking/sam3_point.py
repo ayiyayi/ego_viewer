@@ -55,6 +55,8 @@ def parse_args(argv=None):
     parser.add_argument("--tracking-mode", choices=["separate"], default="separate")
     parser.add_argument("--init-mode", choices=["point", "semantic"], default="point")
     parser.add_argument("--propagation-scheme", choices=["dual", "single_anchor"], default="single_anchor")
+    parser.add_argument("--compact-masks", action="store_true", help="Write lossless packed masks and direct SLAM mask archive.")
+    parser.add_argument("--validate-tracks", action="store_true", help="Validate against cached detections and locally reinitialize failed tracks.")
     parser.add_argument("--cuda-invalid-retries", type=int, default=1)
     parser.add_argument("--git-commit", default="unknown")
     return parser.parse_args(argv)
@@ -269,14 +271,18 @@ def find_obj_or_none(outputs, obj_id: int):
 
 
 def write_record_from_obj(mask_dir: Path, frame_idx: int, side: int, source: str, obj_id: int, boxes_rel, mask, prob, width: int, height: int, prompt_frame: int):
-    box = simple.output_box_xyxy(boxes_rel, mask, width, height)
+    box = simple.mask_to_box(mask) if int(mask.sum()) else simple.output_box_xyxy(boxes_rel, mask, width, height)
     mask_area = int(mask.sum())
     mask_path = None
     if mask_area > 0:
         mask_path = mask_dir / SIDE_NAMES[int(side)] / f"{source}_obj{obj_id}_frame{frame_idx:06d}.png"
         mask_path.parent.mkdir(parents=True, exist_ok=True)
-        ok = cv2.imwrite(str(mask_path), mask.astype(np.uint8) * 255)
-        assert ok, f"failed to write {mask_path}"
+        if mask_dir.name == 'packed_masks':
+            from .mask_io import write_mask
+            mask_path = Path(write_mask(mask_path, mask))
+        else:
+            ok = cv2.imwrite(str(mask_path), mask.astype(np.uint8) * 255)
+            assert ok, f"failed to write {mask_path}"
     return {
         "frame_idx": int(frame_idx),
         "side": int(side),
@@ -316,7 +322,23 @@ def merge_records(records):
     return {key: rec for key, (_, rec) in by_key.items()}
 
 
-def export_framewise(frames, selected, out_dir: Path, width: int, height: int):
+def export_framewise(frames, selected, out_dir: Path, width: int, height: int, compact=False):
+    from .mask_io import read_mask, reduce_union
+    if compact:
+        rows, packed = [], []
+        for t in range(len(frames)):
+            row = {'frame_idx': t}; masks = []
+            for side, name in enumerate(('left','right')):
+                rec = selected.get((t,side))
+                row[f'{name}_mask_path'] = None if rec is None else rec['mask_path']
+                row[f'{name}_mask_area'] = 0 if rec is None else rec['mask_area']
+                row[f'{name}_sam_tight_box_xyxy'] = None if rec is None else rec['box_xyxy']
+                if rec is not None: masks.append(read_mask(rec['mask_path']))
+            low = reduce_union(masks, height, width)
+            packed.append(np.packbits(low)); rows.append(row)
+        np.savez_compressed(out_dir/'slam_masks.npz', packed=np.stack(packed), shape=np.array(low.shape))
+        (out_dir/'sam_tight_bboxes_2d.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
+        return rows
     framewise_dir = out_dir / "framewise_masks"
     zero = np.zeros((height, width), dtype=np.uint8)
     rows = []
@@ -335,9 +357,7 @@ def export_framewise(frames, selected, out_dir: Path, width: int, height: int):
                 row[f"{side_name}_mask_area"] = 0
                 row[f"{side_name}_sam_tight_box_xyxy"] = None
                 continue
-            mask = cv2.imread(rec["mask_path"], cv2.IMREAD_GRAYSCALE)
-            assert mask is not None, f"failed to read {rec['mask_path']}"
-            mask = (mask > 0)
+            mask = read_mask(rec["mask_path"])
             ok = cv2.imwrite(str(out_path), mask.astype(np.uint8) * 255)
             assert ok, f"failed to write {out_path}"
             row[f"{side_name}_mask_path"] = str(out_path)
@@ -353,6 +373,54 @@ def export_framewise(frames, selected, out_dir: Path, width: int, height: int):
         writer.writeheader()
         writer.writerows(rows)
     return rows
+
+
+def validate_tracks(args, predictor, frames, det_by_frame, selected, out_dir, mask_dir, width, height, inmemory_frames=None):
+    from .validation import validate_and_recover
+    import tempfile
+    def recover(side, start, stop, anchor, detection):
+        # A fresh short session cannot inherit the failed track's memory.
+        with tempfile.TemporaryDirectory(prefix='sam_recovery_', dir=out_dir) as folder:
+            if inmemory_frames is not None:
+                resource = frames[start:stop]
+            else:
+                for i, path in enumerate(frames[start:stop]):
+                    (Path(folder) / f'{i:06d}.jpg').symlink_to(Path(path).resolve())
+                resource = folder
+            session = predictor.handle_request({'type': 'start_session', 'resource_path': resource})
+            sid = session['session_id']; obj = side + 1; local = anchor - start
+            recovered = {}
+            try:
+                points, labels, _ = bbox_to_instance_points(detection['box_xyxy'], width, height,
+                    args.point_expand, geometry=args.prompt_geometry,
+                    neg_below_count=args.neg_below_count, neg_below_frac=args.neg_below_frac)
+                response = predictor.handle_request(dict(type='add_prompt', session_id=sid,
+                    frame_index=local, points=points, point_labels=labels, obj_id=obj,
+                    rel_coordinates=True, output_prob_thresh=args.sam_output_thresh))
+                name = f'recovery_{start:06d}'
+                rec = write_record_if_present(mask_dir, anchor, side, name, obj,
+                    response['outputs'], width, height, anchor)
+                if rec is not None: recovered[anchor] = rec
+                for direction, count in [('forward', stop-anchor), ('backward', local+1)]:
+                    for item in predictor.handle_stream_request(dict(type='propagate_in_video',
+                        session_id=sid, propagation_direction=direction, start_frame_index=local,
+                        max_frame_num_to_track=count, output_prob_thresh=args.sam_output_thresh)):
+                        t = start + int(item['frame_index'])
+                        if not start <= t < stop: continue
+                        rec = write_record_if_present(mask_dir, t, side, name, obj,
+                            item['outputs'], width, height, anchor)
+                        if rec is not None: recovered[t] = rec
+            finally:
+                predictor.handle_request({'type': 'close_session', 'session_id': sid})
+            return recovered
+    selected, blocked, validation_report = validate_and_recover(
+        selected, det_by_frame, len(frames), args.fps, recover)
+    with (out_dir / 'validated_records.jsonl').open('w') as handle:
+        for key in sorted(selected): handle.write(json.dumps(selected[key]) + '\n')
+    np.savez_compressed(out_dir / 'tracking_validation.npz', interpolation_blocked=blocked)
+    dump_json(out_dir / 'tracking_validation.json', {'version': 1, 'confirmation_score': .7,
+        'max_unconfirmed_span_s': .5, 'recovery_window_s': .5, 'sides': validation_report})
+    return selected
 
 
 def run_point_prompt(args, predictor=None, inmemory_frames=None):
@@ -383,7 +451,7 @@ def run_point_prompt(args, predictor=None, inmemory_frames=None):
     t_total = now()
     runtime = defaultdict(float)
     t = now()
-    if not any(seeds_by_side.values()):
+    if not any(seeds_by_side.values()) and not args.validate_tracks:
         runtime["model_load_sec"] = 0.0
     elif predictor is not None:
         # Injected warm predictor (persistent worker, D-02): reuse the checkpoint
@@ -395,7 +463,7 @@ def run_point_prompt(args, predictor=None, inmemory_frames=None):
         predictor = simple.build_predictor(args.checkpoint_path, args.default_output_prob_thresh, args.sam_version)
         runtime["model_load_sec"] = now() - t
         runtime["predictor_reused"] = False
-    mask_dir = out_dir / "masks"
+    mask_dir = out_dir / ("packed_masks" if args.compact_masks else "masks")
     all_records = []
     all_prompt_rows = []
     side_summaries = {}
@@ -493,7 +561,10 @@ def run_point_prompt(args, predictor=None, inmemory_frames=None):
         finally:
             predictor.handle_request({"type": "close_session", "session_id": session_id})
     selected = merge_records(all_records)
-    rows = export_framewise(frames, selected, out_dir, width, height)
+    if args.validate_tracks:
+        selected = validate_tracks(args, predictor, frames, det_by_frame, selected,
+                                   out_dir, mask_dir, width, height, inmemory_frames)
+    rows = export_framewise(frames, selected, out_dir, width, height, compact=args.compact_masks)
     records_path = out_dir / "point_prompt_records.jsonl"
     with records_path.open("w", encoding="utf-8") as f:
         for rec in all_records:

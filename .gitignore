@@ -20,3 +20,32 @@ datapipe_workflow/pipelines/finebio/
 datapipe_workflow/scripts/import_classmate_wilor_sam.py
 datapipe_workflow/env_profiles/sam3-installed.txt
 datapipe_workflow/env_profiles/sam3-validation.json
+datapipe_workflow/examples/basematrix_episode_000001_head_left/
+
+datapipe_workflow/experiments
+datapipe_workflow/importers
+
+# Local pipeline intermediates; keep input videos and final viewer outputs:
+# output/ego_action_annotation.json, output/keypoints.npz, output/mesh.bin.
+# README and provenance remain versioned to document the delivered results.
+datapipe_workflow/examples/*/output/raw_wilor/
+datapipe_workflow/examples/*/output/camera_slam.npz
+datapipe_workflow/examples/*/output/sam_boxes.npz
+datapipe_workflow/examples/*/output/processed_mano.npz
+datapipe_workflow/examples/*/output/raw_mano_accepted.npz
+datapipe_workflow/examples/*/output/reexport_reference.npz
+datapipe_workflow/examples/*/output/source_calibration.json
+datapipe_workflow/examples/*/output/source_hand_pose.parquet
+datapipe_workflow/examples/*/output/source_timestamps.npz
+
+# Machine-local receipts, locks, logs, and diagnostic reports.
+datapipe_workflow/examples/*/output/.hand_pipeline.lock
+datapipe_workflow/examples/*/output/*.log
+datapipe_workflow/examples/*/output/*_cache.json
+datapipe_workflow/examples/*/output/camera_pipeline_complete.json
+datapipe_workflow/examples/*/output/*_timings.json
+datapipe_workflow/examples/*/output/sam3_jobs.timings.json
+datapipe_workflow/examples/*/output/tracking_validation.json
+datapipe_workflow/examples/*/output/temporal_report.json
+datapipe_workflow/examples/*/output/experiment_report.json
+datapipe_workflow/examples/*/output/import_report.json

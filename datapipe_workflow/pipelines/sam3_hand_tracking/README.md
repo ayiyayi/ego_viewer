@@ -19,10 +19,41 @@ not imported. Model code is supplied through a separate SAM3 checkout.
    side, so a clip without simultaneous confident left/right detections does
    not fail the upstream joint-initialization assertion. Process at most 600
    source frames per session. Actual source FPS is passed; no resampling.
-4. HaWoR consumes the SAM mask tight boxes, then saves `sam_boxes.npz`. The
-   segmented runner merges this archive in source-frame order. WiLoR reuses it
-   without running detection or SAM again. Missing masks remain missing.
-5. Existing viewer `keypoints.npz` / `mesh.bin` schemas and cameras are unchanged.
+4. For `annotate_video.py --hands wilor`, `resident_worker.py` loads SAM3 once
+   for all 600-frame jobs across the video's camera chunks. Sessions remain
+   separate per hand. The worker exits before SLAM so its GPU memory is released.
+5. `wilor/camera_pipeline.py` unions left/right SAM masks, resizes and crops
+   them to DROID's image geometry, and stores boolean masks. Foreground is
+   excluded from both SLAM and Metric3D scale estimation. This path does not
+   run HaWoR hand estimation, mesh-mask rendering, or the hand infiller.
+6. WiLoR consumes the merged `sam_boxes.npz` and camera trajectory, followed
+   by MANO v3 temporal processing (now the default). Existing jump rejection
+   stays unchanged. Eligible gaps up to 0.3 seconds use MANO rotation SLERP
+   and linear wrist/shape interpolation, followed by bounded wrist smoothing
+   (at most 1.5 cm and 5 pixels). Camera breaks and endpoint motion/pose gates
+   prevent unsafe interpolation. Finger poses on observed frames are retained.
+   MANO parameters are captured during WiLoR inference, without a second pass.
+   `output/raw_wilor/` preserves pre-filter geometry and MANO parameters;
+   `processed_mano.npz` records accepted/interpolated masks and parameters,
+   and `temporal_report.json` records counts and smoothing metrics.
+   Viewer `keypoints.npz` / `mesh.bin` schemas are unchanged.
+
+`--hands hawor` retains the full HaWoR path. The WiLoR camera path retains the
+existing 100-second camera chunking and merge policy; it does not fix camera
+discontinuities between chunks. SAM masks differ from rendered MANO masks, so
+camera estimates can change and should be visually checked.
+
+WiLoR outputs retain `camera_pipeline.log`, `stage_timings.json`,
+`sam3_jobs.timings.json`, `hand_pipeline_timings.json`, and `camera_slam.npz`.
+Work directories are retained under `$EGO_VIEWER_WORK_ROOT/pipeline_cache/` for
+resume and reuse, including extracted frames and masks. They consume disk space;
+remove an inactive cache directory manually when it is no longer needed.
+`hand_pipeline_timings.json` records current-call elapsed time and cache-hit flags.
+`stage_timings.json` retains the camera stages' timings; a cache hit is not a fresh
+inference benchmark.
+Direct calls to `wilor/export_viewer.py` need `--temporal-v3`; this preserves the
+raw-export interface for callers that apply their own postprocessor. The normal
+`annotate_video.py --hands wilor` entry point always enables v3.
 
 Cold-start side identity still depends on detector labels. Association is a
 heuristic; long absences, crossings, and SAM session boundaries can still need
@@ -115,3 +146,67 @@ source /data-hyp/ego_viewer/datapipe_workflow/env_profiles/sam3.env
 
 This check does not run the model or download weights. Use a short video smoke
 test once the checkpoint is present before attempting a full FineBio run.
+
+
+## Track validation and local recovery
+
+The WiLoR camera pipeline now passes `--validate-tracks`. It reuses the already
+computed per-frame detector results; it does not run YOLO again for each failure.
+Before exporting masks or crop boxes, both sides are checked independently:
+
+- Detector confidence must be at least 0.70 to confirm SAM. Lower-confidence
+  face false positives were observed in packaging, so 0.5 is insufficient.
+- Require detector-box coverage >=0.45, IoU >=0.15 and SAM/detector box area
+  ratio in [0.15, 3.5]. These are initial heuristic thresholds, not calibrated
+  accuracy guarantees.
+- Frames without a reliable detection can only survive between two confirmed
+  frames at most 0.5 seconds apart, with no detection conflict or abrupt box
+  jump. Area changes above 3x or large center jumps break this bridge. A jump
+  with direct high-confidence detector agreement remains allowed.
+- Each failed 0.5-second block can receive one fresh SAM session seeded by its
+  strongest >=0.70 detection. Propagation stays inside that short block. The
+  recovered masks undergo the same checks; earlier independently verified
+  frames are retained. The initial pass still uses 600-frame sessions.
+- Unconfirmed masks are zeroed before SLAM, and their crop boxes are removed
+  before WiLoR. `sam_boxes.npz` includes `interpolation_blocked` (frames, 2),
+  preventing v3 from filling across these failures. Visibility may decrease
+  when the detector is uncertain; detection/SAM agreement cannot guarantee
+  correct identity or reject a high-confidence false positive.
+
+`tracking_validation.json` is retained in the final output, including per-frame
+reasons and recovery counts. Existing annotations are not modified automatically;
+a new run is necessary to update both hand estimates and the camera masks.
+
+
+## Performance and reuse
+
+`annotate_video.py --hands wilor` automatically reuses completed camera/SAM,
+raw WiLoR/MANO, and temporal-output stages. Receipts check input file metadata,
+configuration, relevant implementation source and output size/mtime. Model
+weights use file metadata rather than expensive checkpoint hashing. Outputs
+from older runs without receipts are not silently trusted. Camera work retains
+split/detection receipts and per-SAM-job/per-SLAM-chunk receipts for resume.
+Never edit intermediate files inside a managed cache.
+
+- `--wilor-batch-size 16` (default): batch crops across frames, prefetch one CPU
+  batch, preserve each crop's frame/side association. Use `2` to compare numerical
+  behavior or reduce VRAM. Floating-point results need not be bit-identical.
+- `--force-hands`: create a fresh cache and rerun hand/camera stages.
+- `--postprocess-only`: use `output/raw_wilor/{keypoints,mano}.npz` on CPU. This
+  also works for older v3 exports that saved raw MANO, without any cache receipt.
+  It skips captions, detection, SAM, SLAM and the WiLoR neural network.
+
+Example, from `datapipe_workflow`:
+
+```bash
+python annotate_video.py examples/ego_hand_04_packaging/input/ego_hand_04_packaging.mp4 \
+  --output examples/ego_hand_04_packaging --postprocess-only
+```
+
+SAM workers reuse the backend's exact preprocessed tensor for the second hand
+within a job; local recovery sessions remain independent. Compact mode stores
+intermediate masks as lossless packed bits with fast zlib compression and writes
+SLAM-resolution union masks directly. It avoids full-resolution framewise PNG
+exports/reloads. Resize/crop, frame rate, detector thresholds and validation
+rules are unchanged. Standalone SAM runs retain the PNG interface unless
+`--compact-masks` is passed.

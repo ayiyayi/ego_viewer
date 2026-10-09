@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import time
 import os
 import struct
 import sys
@@ -179,7 +181,7 @@ def write_viewer(
     np.savez_compressed(
         keypoints,
         joints_world=joints,
-        pred_valid=valid,
+        pred_valid=np.asarray(valid, dtype=np.float32),
         R_w2c=np.ascontiguousarray(r_w2c, dtype=np.float32),
         t_w2c=np.ascontiguousarray(t_w2c, dtype=np.float32),
         cam_pos=np.ascontiguousarray(t_c2w, dtype=np.float32),
@@ -236,6 +238,8 @@ def export_video(
     sam3_python: Path | None = None,
     sam3_src: Path | None = None,
     hand_boxes: Path | None = None,
+    temporal_v3: bool = False,
+    batch_size: int = 16,
 ) -> tuple[Path, Path]:
     import torch
     from torch.utils.data import DataLoader
@@ -251,9 +255,15 @@ def export_video(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     detector = None if hand_boxes is not None else YOLO(str(detector_path))
     sam_boxes = None
+    interpolation_blocked = None
     if hand_boxes is not None:
         from pipelines.sam3_hand_tracking.refine import load_box_archive
         stored, mask = load_box_archive(hand_boxes, n, width, height)
+        with np.load(hand_boxes) as archive:
+            if 'interpolation_blocked' in archive:
+                interpolation_blocked = archive['interpolation_blocked'].astype(bool).T
+                if interpolation_blocked.shape != (2, n): raise ValueError('Invalid tracking validation timeline')
+                if np.any(interpolation_blocked.T & mask): raise ValueError('Blocked SAM frames must not have boxes')
         sam_boxes = [{side: stored[t, side] if mask[t, side] else None for side in (0, 1)} for t in range(n)]
     if sam3_checkpoint is not None:
         if hand_boxes is not None or sam3_python is None or sam3_src is None:
@@ -300,63 +310,86 @@ def export_video(
     verts = np.zeros((2, n, n_verts, 3), dtype=np.float32)
     valid = np.zeros((2, n), dtype=np.float32)
 
-    frame_i = 0
+    params = None
+    if temporal_v3:
+        params = dict(pose=np.tile(np.eye(3, dtype=np.float32), (2, n, 15, 1, 1)),
+                      world_rot=np.tile(np.eye(3, dtype=np.float32), (2, n, 1, 1)),
+                      betas=np.zeros((2, n, 10), np.float32),
+                      wrist=np.zeros((2, n, 3), np.float32))
+    from pipelines.wilor.batching import crop_batches, prefetch
+    decoded = 0
     associator = ContinuityAssociator()
-    for frame in iter_frames(video, frames_dir, n):
-        boxes, right = None, None
-        if sam_boxes is None:
-            boxes, right = select_hands(detector(frame, conf=0.3, verbose=False)[0],
-                                        associator=associator, image_shape=frame.shape)
-        else:
-            if frame_i >= len(sam_boxes):
-                raise ValueError('SAM3 timeline shorter than decoded frames')
-            refined = sam_boxes[frame_i]
-            rows = [(side, refined.get(side)) for side in (0, 1) if refined.get(side) is not None]
-            if rows:
-                boxes = np.stack([np.asarray(box, dtype=np.float32) for _, box in rows])
-                right = np.asarray([float(side) for side, _ in rows], dtype=np.float32)
-        if boxes is not None:
-            dataset = ViTDetDataset(model_cfg, frame, boxes, right, rescale_factor=rescale_factor)
-            loader = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0)
-            for batch in loader:
-                batch = {
-                    key: value.to(device) if torch.is_tensor(value) else value
-                    for key, value in batch.items()
-                }
-                with torch.inference_mode():
-                    out = model(batch)
-                img_size = batch["img_size"].float()
-                cam = align_pred_cam(out["pred_cam"], batch["right"])
-                cam_t = cam_crop_to_full(
-                    cam,
-                    batch["box_center"].float(),
-                    batch["box_size"].float(),
-                    img_size,
-                    focal,
-                )
-                pred_j = out["pred_keypoints_3d"][:, :21].detach()
-                pred_v = out["pred_vertices"].detach()
-                sign = (2 * batch["right"].float() - 1).view(-1, 1)
-                pred_j = pred_j.clone()
-                pred_v = pred_v.clone()
-                pred_j[:, :, 0] *= sign
-                pred_v[:, :, 0] *= sign
-                pred_j = pred_j + cam_t[:, None, :]
-                pred_v = pred_v + cam_t[:, None, :]
-                sides = batch["right"].detach().cpu().numpy().astype(np.int32)
-                pred_j = pred_j.cpu().numpy()
-                pred_v = pred_v.cpu().numpy()
-                rotation = r_c2w[frame_i]
-                translation = t_c2w[frame_i]
-                for row, side in enumerate(sides):
-                    if side not in (0, 1):
-                        continue
-                    joints[side, frame_i] = camera_to_world(pred_j[row], rotation, translation)
-                    verts[side, frame_i] = camera_to_world(pred_v[row], rotation, translation)
-                    valid[side, frame_i] = 1.0
-        frame_i += 1
-        if frame_i % 30 == 0:
-            print(f"frame {frame_i}", flush=True)
+    def crops():
+        nonlocal decoded
+        for frame_i, frame in enumerate(iter_frames(video, frames_dir, n)):
+            decoded = frame_i + 1
+            boxes, right = None, None
+            if sam_boxes is None:
+                boxes, right = select_hands(detector(frame, conf=0.3, verbose=False)[0],
+                                            associator=associator, image_shape=frame.shape)
+            else:
+                if frame_i >= len(sam_boxes):
+                    raise ValueError('SAM3 timeline shorter than decoded frames')
+                refined = sam_boxes[frame_i]
+                rows = [(side, refined.get(side)) for side in (0, 1) if refined.get(side) is not None]
+                if rows:
+                    boxes = np.stack([np.asarray(box, dtype=np.float32) for _, box in rows])
+                    right = np.asarray([float(side) for side, _ in rows], dtype=np.float32)
+            if boxes is not None:
+                dataset = ViTDetDataset(model_cfg, frame, boxes, right, rescale_factor=rescale_factor)
+                for i in range(len(dataset)):
+                    yield frame_i, dataset[i]
+    start_inference = time.perf_counter()
+    batches = crop_batches(crops(), batch_size)
+    for frame_ids, batch in (prefetch(batches) if sam_boxes is not None else batches):
+        batch = {
+            key: value.to(device) if torch.is_tensor(value) else value
+            for key, value in batch.items()
+        }
+        with torch.inference_mode():
+            out = model(batch)
+        img_size = batch["img_size"].float()
+        cam = align_pred_cam(out["pred_cam"], batch["right"])
+        cam_t = cam_crop_to_full(
+            cam,
+            batch["box_center"].float(),
+            batch["box_size"].float(),
+            img_size,
+            focal,
+        )
+        pred_j = out["pred_keypoints_3d"][:, :21].detach()
+        pred_v = out["pred_vertices"].detach()
+        sign = (2 * batch["right"].float() - 1).view(-1, 1)
+        pred_j = pred_j.clone()
+        pred_v = pred_v.clone()
+        pred_j[:, :, 0] *= sign
+        pred_v[:, :, 0] *= sign
+        pred_j = pred_j + cam_t[:, None, :]
+        pred_v = pred_v + cam_t[:, None, :]
+        sides = batch["right"].detach().cpu().numpy().astype(np.int32)
+        pred_j = pred_j.cpu().numpy()
+        pred_v = pred_v.cpu().numpy()
+        mp = {k: v.detach().cpu().numpy() for k, v in out["pred_mano_params"].items()} if params is not None else None
+        for row, side in enumerate(sides):
+            frame_i = frame_ids[row]
+            rotation = r_c2w[frame_i]
+            translation = t_c2w[frame_i]
+            if side not in (0, 1):
+                continue
+            joints[side, frame_i] = camera_to_world(pred_j[row], rotation, translation)
+            verts[side, frame_i] = camera_to_world(pred_v[row], rotation, translation)
+            valid[side, frame_i] = 1.0
+            if params is not None:
+                mirror = np.diag([-1., 1., 1.]) if side == 0 else np.eye(3)
+                orient = mp["global_orient"][row].reshape(3, 3)
+                params['world_rot'][side, frame_i] = rotation @ mirror @ orient @ mirror
+                params['pose'][side, frame_i] = mp['hand_pose'][row].reshape(15, 3, 3)
+                params['betas'][side, frame_i] = mp['betas'][row].reshape(10)
+                params['wrist'][side, frame_i] = joints[side, frame_i, 0]
+        if frame_ids[-1] // 30 != frame_ids[0] // 30:
+            print(f"frame {frame_ids[-1]+1}", flush=True)
+    frame_i = decoded
+    print(f"WiLoR decode/crop/inference: {time.perf_counter()-start_inference:.2f}s; batch_size={batch_size}", flush=True)
     if frame_i == 0:
         raise SystemExit(f"video has no frames: {video}")
     if frame_i != n:
@@ -364,6 +397,24 @@ def export_video(
     joints = joints[:, :frame_i]
     verts = verts[:, :frame_i]
     valid = valid[:, :frame_i]
+    if params is not None:
+        from pipelines.wilor.temporal import process_v3
+        post_start = time.perf_counter()
+        params = {k: v[:, :frame_i] for k, v in params.items()}
+        raw_dir = out_dir / 'raw_wilor'
+        raw_kp, _ = write_viewer(raw_dir, joints, verts, valid, faces, focal, width, height, fps,
+                               r_w2c[:frame_i], t_w2c[:frame_i], r_c2w[:frame_i], t_c2w[:frame_i])
+        np.savez_compressed(raw_dir / 'mano.npz', **params, valid=valid)
+        with np.load(raw_kp) as f:
+            data = {k: f[k] for k in f.files}
+        if interpolation_blocked is not None:
+            data['interpolation_blocked'] = interpolation_blocked[:, :frame_i]
+            np.savez_compressed(raw_kp, **data)
+        joints, verts, valid, processed, report = process_v3(data, params, model.mano)
+        np.savez_compressed(out_dir / 'processed_mano.npz', **processed)
+        report['postprocess_seconds'] = time.perf_counter() - post_start
+        (out_dir / 'temporal_report.json').write_text(json.dumps(report, indent=2) + '\n')
+        print(f"MANO v3: {report}", flush=True)
     keypoints, mesh = write_viewer(
         out_dir,
         joints,
@@ -401,6 +452,8 @@ def main() -> None:
     parser.add_argument("--sam3-python", type=Path, default=None, help="Python interpreter in the separate SAM3 environment.")
     parser.add_argument("--sam3-src", type=Path, default=None, help="SAM3 source checkout used by the separate interpreter.")
     parser.add_argument("--hand-boxes", type=Path, help="Aligned SAM3 box archive from HaWoR, left/right order.")
+    parser.add_argument("--temporal-v3", action="store_true", help="MANO v3 gap interpolation and bounded wrist smoothing (annotate_video default).")
+    parser.add_argument("--batch-size", type=int, default=16, help="Hand crops per inference batch, across video frames.")
     args = parser.parse_args()
 
     if str(WILOR_ROOT) not in sys.path:
@@ -434,6 +487,8 @@ def main() -> None:
         sam3_python=args.sam3_python.expanduser().resolve() if args.sam3_python else None,
         sam3_src=args.sam3_src.expanduser().resolve() if args.sam3_src else None,
         hand_boxes=args.hand_boxes.expanduser().resolve() if args.hand_boxes else None,
+        temporal_v3=args.temporal_v3,
+        batch_size=args.batch_size,
     )
 
 

@@ -51,7 +51,7 @@ def load_box_archive(path, frame_count, width, height):
     return boxes, valid
 
 
-def save_box_archive(path, rows, width, height):
+def save_box_archive(path, rows, width, height, interpolation_blocked=None):
     boxes = np.zeros((len(rows), 2, 4), dtype=np.float32)
     valid = np.zeros((len(rows), 2), dtype=bool)
     for t, row in enumerate(rows):
@@ -62,7 +62,13 @@ def save_box_archive(path, rows, width, height):
                     raise ValueError(f'Invalid SAM3 box at {t}, side {side}')
                 boxes[t, side] = box
                 valid[t, side] = True
-    np.savez_compressed(path, boxes=boxes, valid=valid, width=width, height=height, side_order='left,right')
+    extra = {}
+    if interpolation_blocked is not None:
+        blocked = np.asarray(interpolation_blocked, dtype=bool)
+        if blocked.shape != valid.shape: raise ValueError('Invalid blocked timeline')
+        if np.any(blocked & valid): raise ValueError('Rejected tracks must not export boxes')
+        extra['interpolation_blocked'] = blocked
+    np.savez_compressed(path, boxes=boxes, valid=valid, width=width, height=height, side_order='left,right', **extra)
 
 
 def refine_boxes_with_sam3(frames_dir, detections, work_dir, checkpoint, python_bin, sam3_src,

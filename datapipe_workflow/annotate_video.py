@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Annotate one ego video: actions, scene, and hands.
 
-The hand path is SAM boxes, a HaWoR SLAM camera trajectory, and WiLoR poses.
-After the lift, wrists faster than 1.5 m/s are masked, and only a gap shorter
-than 1/6 s is interpolated. Pass --hands hawor to keep HaWoR's own hands.
+The WiLoR hand path is detection, resident SAM3, SAM-mask SLAM/Metric3D,
+and WiLoR poses. It does not run HaWoR hand reconstruction or infilling.
+After the lift, wrists faster than 1.5 m/s are masked, and eligible gaps up to
+0.3 s are interpolated in MANO parameter space, followed by bounded wrist
+smoothing. Pass --hands hawor to keep HaWoR's own hands.
 
 Only the video path is required. API settings come from
 pipelines/caption/api_config.json. HaWoR uses the Python in
@@ -35,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -202,63 +205,88 @@ def run_hands(video: Path, output: Path) -> Path:
     return dest
 
 
-def run_wilor(video: Path, output: Path) -> tuple[Path, dict]:
-    """SAM boxes, HaWoR camera trajectory, WiLoR hands, then mask and interpolation."""
+def run_wilor(video: Path, output: Path, *, batch_size=16, force=False) -> tuple[Path, dict]:
+    from pipelines.wilor.cache import lock
+    with lock(output / "output" / ".hand_pipeline.lock"):
+        return _run_wilor_cached(video, output, batch_size=batch_size, force=force)
+
+
+def _run_wilor_cached(video, output, *, batch_size, force):
     from pipelines.sam3_hand_tracking.refine import environment_config
-    from pipelines.wilor.postprocess import stabilize_viewer_dir
+    from pipelines.wilor.cache import stamp, key, valid, complete
+    from pipelines.wilor.export_viewer import WILOR_ROOT
     load_sam3_env()
-    sam_config = environment_config()
-    if not sam_config:
-        raise SystemExit("SAM3 is required. Set the variables in env_profiles/sam3.env.")
-    if not WILOR_PYTHON.is_file():
-        raise SystemExit(f"WiLoR python not found: {WILOR_PYTHON}")
-    hawor = load_module("hawor_video_processor", HAWOR_PROCESSOR)
-    work = hand_work_dir(video, "wilor")
-    config = hawor.HaWoRProcessorConfig(
-        python_bin=sys.executable,
-        vis_mode="off",
-        run_post_steps=False,
-        cleanup_intermediate=True,
-    )
-    hawor.process_video(
-        video,
-        work,
-        gpu_ids=(profile_gpu(),),
-        config=config,
-        overwrite_output=True,
-    )
-    slam_loader = load_module("export_openaoe_hands", HAWOR_PROCESSOR.parent / "export_openaoe_hands.py")
-    slam = slam_loader.pick_slam_npz(work)
-    frames = work / "extracted_images"
-    dest = output / "output"
-    dest.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = profile_gpu()
-    cmd = [
-        str(WILOR_PYTHON),
-        str(WILOR_SCRIPT),
-        "--video",
-        str(video),
-        "--output-dir",
-        str(dest),
-        "--slam",
-        str(slam),
-    ]
-    if frames.is_dir():
-        cmd.extend(["--frames", str(frames)])
-    if sam_config:
-        sam_boxes = work / 'sam_boxes.npz'
-        if not sam_boxes.is_file():
-            raise FileNotFoundError(f'HaWoR did not export SAM3 boxes: {sam_boxes}')
-        shutil.copy2(sam_boxes, dest / 'sam_boxes.npz')
-        cmd.extend(['--hand-boxes', str(sam_boxes)])
-    subprocess.check_call(cmd, env=env)
-    shutil.rmtree(work)
-    keypoints = dest / "keypoints.npz"
-    if not keypoints.is_file():
-        raise SystemExit(f"WiLoR did not write {keypoints}")
-    report = stabilize_viewer_dir(dest)
-    return keypoints, report
+    cfg = environment_config()
+    if not cfg: raise SystemExit("SAM3 environment is required")
+    if batch_size < 1: raise ValueError("batch_size must be positive")
+    env = os.environ.copy(); env["CUDA_VISIBLE_DEVICES"] = profile_gpu()
+    dest = output / "output"; dest.mkdir(parents=True, exist_ok=True)
+    code = [ROOT/"pipelines/wilor/camera_pipeline.py", ROOT/"pipelines/hand_association.py", ENV_PROFILE]
+    code += [p for p in (ROOT/"pipelines/sam3_hand_tracking").glob("*.py") if not p.name.startswith("test_")]
+    code += [ROOT/"pipelines/wilor/cache.py", ROOT/"pipelines/hawor/scripts/scripts_test_video/hawor_slam.py"]
+    code += [ROOT/"pipelines/hawor/lib/pipeline/tools.py", ROOT/"pipelines/hawor/scripts/segmented_demo_pipeline.py"]
+    camera_key = key(dict(video=stamp(video), sam={k:str(v) for k,v in cfg.items()},
+        checkpoint=stamp(cfg['checkpoint']), detector=stamp(ROOT/'pipelines/hawor/weights/external/detector.pt'),
+        backend_weights=[stamp(p) for p in sorted((ROOT/'pipelines/hawor/weights').rglob('*')) if p.is_file() and p.suffix in {'.pth','.pt','.ckpt'}], version=2,
+        force=None), code)
+    work_root = Path(os.environ.get("EGO_VIEWER_WORK_ROOT", "/data/heyuping/ego_viewer/demo"))
+    work = work_root / "pipeline_cache" / (f"{camera_key}-{time.time_ns()}" if force else camera_key)
+    camera_files = [dest/name for name in ('camera_slam.npz','sam_boxes.npz','tracking_validation.json','camera_pipeline_complete.json')]
+    started=time.perf_counter()
+    camera_hit=not force and valid(dest/'camera_cache.json',camera_key)
+    if camera_hit:
+        saved=json.loads((dest/"camera_pipeline_complete.json").read_text())
+        work=Path(saved.get("cache_work_dir",str(work)))
+        print("CACHE HIT: camera + validated SAM boxes",flush=True)
+    else:
+        work.mkdir(parents=True,exist_ok=True)
+        print(f"Camera pipeline log: {dest/'camera_pipeline.log'}; resume cache: {work}",flush=True)
+        with (dest/'camera_pipeline.log').open('a') as log:
+            subprocess.run([sys.executable,'-u',str(ROOT/'pipelines/wilor/camera_pipeline.py'),
+                '--video',str(video),'--work',str(work)],env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+        result=json.loads((work/'camera_pipeline_complete.json').read_text())
+        shutil.copy2(result['slam'],dest/'camera_slam.npz')
+        result['slam']=str(dest/'camera_slam.npz')
+        result['cache_work_dir']=str(work)
+        (dest/'camera_pipeline_complete.json').write_text(json.dumps(result,indent=2))
+        for name in ('sam_boxes.npz','stage_timings.json','sam3_jobs.timings.json','tracking_validation.json'):
+            shutil.copy2(work/name,dest/name)
+        complete(dest/'camera_cache.json',camera_key,camera_files)
+    camera_seconds=time.perf_counter()-started
+    frames=work/'extracted_images'
+    raw_key=key(dict(camera=camera_key, camera_file=stamp(dest/'camera_slam.npz'),
+        boxes=stamp(dest/'sam_boxes.npz'), batch_size=batch_size,
+        checkpoint=stamp(WILOR_ROOT/'pretrained_models/wilor_final.ckpt'),
+        config=stamp(WILOR_ROOT/'pretrained_models/model_config.yaml'),
+        input_mode='frames' if frames.is_dir() else 'video'),
+        [WILOR_SCRIPT,ROOT/'pipelines/wilor/batching.py',WILOR_ROOT/'wilor/models/wilor.py',WILOR_ROOT/'wilor/datasets/vitdet_dataset.py'])
+    raw_files=[dest/'raw_wilor'/name for name in ('keypoints.npz','mesh.bin','mano.npz')]
+    raw_hit=valid(dest/'wilor_cache.json',raw_key)
+    started=time.perf_counter()
+    if raw_hit:
+        print("CACHE HIT: raw WiLoR + MANO parameters",flush=True)
+    else:
+        cmd=[str(WILOR_PYTHON),'-u',str(WILOR_SCRIPT),'--temporal-v3','--video',str(video),
+             '--output-dir',str(dest),'--slam',str(dest/'camera_slam.npz'),
+             '--hand-boxes',str(dest/'sam_boxes.npz'),'--batch-size',str(batch_size)]
+        if frames.is_dir():cmd += ['--frames',str(frames)]
+        subprocess.check_call(cmd,env=env)
+        complete(dest/'wilor_cache.json',raw_key,raw_files)
+    post_key=key(dict(raw=raw_key,files=[stamp(p) for p in raw_files]),
+        [ROOT/'pipelines/wilor'/name for name in ('temporal.py','postprocess.py','reprocess.py')])
+    post_files=[dest/name for name in ('keypoints.npz','mesh.bin','processed_mano.npz','temporal_report.json')]
+    post_hit=raw_hit and valid(dest/'temporal_cache.json',post_key)
+    if raw_hit and not post_hit:
+        print("Reprocessing saved MANO on CPU; no detection/SAM/SLAM/WiLoR inference",flush=True)
+        subprocess.check_call([str(WILOR_PYTHON),str(ROOT/'pipelines/wilor/reprocess.py'),
+                               '--output-dir',str(dest)],env=env)
+    if not post_hit:complete(dest/'temporal_cache.json',post_key,post_files)
+    report=json.loads((dest/'temporal_report.json').read_text())
+    timing=dict(camera_pipeline_seconds=camera_seconds,wilor_and_postprocess_seconds=time.perf_counter()-started,
+                camera_cache_hit=camera_hit,wilor_cache_hit=raw_hit,temporal_cache_hit=post_hit,
+                work_dir=str(work),mask_source='sam3',batch_size=batch_size)
+    (dest/'hand_pipeline_timings.json').write_text(json.dumps(timing,indent=2))
+    return dest/'keypoints.npz',report
 
 
 def export_viewer_hands(video: Path, hands: Path) -> None:
@@ -292,6 +320,9 @@ def main() -> None:
         default="wilor",
         help="wilor uses SAM boxes, the HaWoR camera trajectory, and WiLoR hands. hawor keeps HaWoR's own hands.",
     )
+    parser.add_argument("--postprocess-only", action="store_true", help="Reprocess existing raw_wilor MANO on CPU, without camera or network inference.")
+    parser.add_argument("--wilor-batch-size", type=int, default=16, help="Hand crops per GPU batch.")
+    parser.add_argument("--force-hands", action="store_true", help="Use a fresh camera/hand cache instead of resuming.")
     parser.add_argument("--hands-only", action="store_true", help="Skip caption API and action annotations.")
     parser.add_argument("--actions-only", action="store_true", help="Skip hand reconstruction and write action labels only.")
     parser.add_argument(
@@ -306,6 +337,8 @@ def main() -> None:
     if args.hands_only and args.labels is not None:
         raise SystemExit("--labels is unused with --hands-only")
 
+    if args.postprocess_only and (args.actions_only or args.hands != 'wilor' or args.force_hands or args.labels is not None):
+        raise SystemExit('--postprocess-only requires WiLoR and cannot combine with actions/force/labels')
     ensure_hawor_python()
     video = args.video.expanduser().resolve()
     if not video.is_file():
@@ -313,6 +346,12 @@ def main() -> None:
     output = (args.output or video.with_name(video.stem + "_annotation")).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
 
+    if args.postprocess_only:
+        from pipelines.wilor.cache import lock
+        with lock(output/"output"/".hand_pipeline.lock"):
+            subprocess.check_call([str(WILOR_PYTHON),str(ROOT/'pipelines/wilor/reprocess.py'),
+                               '--output-dir',str(output/'output')])
+        return
     placed = place_video(video, output)
     summary = {"output": str(output), "video": str(placed), "hands_backend": args.hands}
     if not args.hands_only:
@@ -324,7 +363,7 @@ def main() -> None:
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
     if args.hands == "wilor":
-        keypoints, report = run_wilor(video, output)
+        keypoints, report = run_wilor(video, output, batch_size=args.wilor_batch_size, force=args.force_hands)
         summary["keypoints"] = str(keypoints)
         summary["mesh"] = str(keypoints.with_name("mesh.bin"))
         summary["postprocess"] = report

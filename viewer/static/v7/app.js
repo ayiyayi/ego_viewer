@@ -240,6 +240,7 @@
         state.hands = {
           n: hands.n,
           focal: hands.focal,
+          projection: hands.projection || null,
           width: hands.width,
           height: hands.height,
           fps: hands.fps,
@@ -250,15 +251,8 @@
           camPos: decode(hands.camPos, Float32Array),
           camZ: decode(hands.camZ, Float32Array),
           camR: hands.camR ? decode(hands.camR, Float32Array) : null,
-          mesh: null,
           center: [0, 0, 0],
         };
-        if (sample.mesh_ready) {
-          setStatus("Reading hand mesh", "busy");
-          const buffer = await fetch(sample.mesh_url).then((res) => res.arrayBuffer());
-          if (token !== loadToken) return;
-          state.hands.mesh = parseMesh(buffer);
-        }
         setStatus("Keypoints overlaid", "ready");
       } else {
         setStatus("Hands not exported", "pending");
@@ -297,7 +291,7 @@
       rows.push(["frame rate", `${state.hands.fps.toFixed(0)}<small>fps</small>`]);
     }
     rows.push(["3d hands", state.hands
-      ? (state.hands.mesh ? "MANO<small>+mesh</small>" : "keypoints")
+      ? "21 joints<small>light hand</small>"
       : "<small>not exported</small>"]);
     statsEl.innerHTML = rows.map(([label, value]) => (
       `<div><dt>${label}</dt><dd>${value}</dd></div>`
@@ -464,6 +458,7 @@
     return state.hands.valid[hand * state.hands.n + frame] > 0;
   }
 
+
   function toCamera(frame, point) {
     const hands = state.hands;
     const r = frame * 9;
@@ -479,6 +474,17 @@
   }
 
   function project(point, width, height) {
+    if (!point.every(Number.isFinite) || point[2] <= 0) return null;
+    const projection = state.hands.projection;
+    if (projection && projection.model === "kb4") {
+      const [fx, fy, cx, cy, k1, k2, k3, k4] = projection.intrinsics;
+      const radius = Math.hypot(point[0], point[1]);
+      const theta = Math.atan2(radius, point[2]);
+      const t2 = theta * theta;
+      const distorted = theta * (1 + t2 * (k1 + t2 * (k2 + t2 * (k3 + t2 * k4))));
+      const ratio = radius > 0 ? distorted / radius : 1;
+      return [fx * point[0] * ratio + cx, fy * point[1] * ratio + cy];
+    }
     const z = Math.abs(point[2]) < 1e-6 ? 1e-6 : point[2];
     const focal = state.hands.focal;
     return [
@@ -499,8 +505,9 @@
         const future = frame + step;
         if (future >= state.hands.n || !validAt(hand, future)) continue;
         const cam = toCamera(frame, jointWorld(hand, future, 0));
-        if (cam[2] <= 0.05) continue;
-        const [u, v] = project(cam, state.hands.width, state.hands.height);
+        const projected = project(cam, state.hands.width, state.hands.height);
+        if (!projected) continue;
+        const [u, v] = projected;
         const alpha = (1 - step / 30) * 0.85;
         octx.fillStyle = `rgba(${TRAIL_RGB[hand]},${alpha})`;
         octx.beginPath();
@@ -516,14 +523,22 @@
       FINGERS.forEach((chain, finger) => {
         octx.strokeStyle = FINGER_COLORS[finger];
         octx.beginPath();
-        chain.forEach((joint, index) => {
+        let connected = false;
+        chain.forEach((joint) => {
+          if (!points[joint]) {
+            connected = false;
+            return;
+          }
           const [u, v] = points[joint];
-          if (index === 0) octx.moveTo(u, v);
+          if (!connected) octx.moveTo(u, v);
           else octx.lineTo(u, v);
+          connected = true;
         });
         octx.stroke();
       });
-      points.forEach(([u, v], joint) => {
+      points.forEach((point, joint) => {
+        if (!point) return;
+        const [u, v] = point;
         octx.fillStyle = joint === 0 ? "#f8fafc" : FINGER_COLORS[Math.floor((joint - 1) / 4)];
         octx.beginPath();
         octx.arc(u, v, joint === 0 ? 5 : 3.5, 0, Math.PI * 2);
@@ -532,7 +547,7 @@
       const label = HAND_LABEL[hand];
       octx.fillStyle = label.color;
       octx.font = "700 28px sans-serif";
-      octx.fillText(label.name, points[0][0] - 10, points[0][1] - 16);
+      if (points[0]) octx.fillText(label.name, points[0][0] - 10, points[0][1] - 16);
     }
   }
 
@@ -634,17 +649,6 @@
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-  }
-
-  function parseMesh(buffer) {
-    const header = new DataView(buffer);
-    const n = header.getUint32(0, true);
-    const nv = header.getUint32(4, true);
-    const nf = header.getUint32(8, true);
-    const faces = new Int32Array(buffer, 12, nf * 3);
-    const vertOffset = 12 + nf * 3 * 4;
-    const verts = new Float16Array(buffer, vertOffset, 2 * n * nv * 3);
-    return { n, nv, nf, faces, verts };
   }
 
   const DEFAULT_VIEW = { azimuth: 40, elevation: 20, zoom: 1, panX: 0, panY: 0 };
@@ -849,11 +853,54 @@
     return colors;
   }
 
-  function copyMeshVerts(mesh, hand, frame) {
-    const out = new Float32Array(mesh.nv * 3);
-    const base = (hand * mesh.n + frame) * mesh.nv * 3;
-    for (let i = 0; i < out.length; i += 1) out[i] = mesh.verts[base + i];
-    return out;
+  // 200 triangles: a six-corner palm slab (20) and 15 square prisms (180).
+  // Geometry follows the 21 exported joints; no MANO mesh download is needed.
+  function buildLightHand(points) {
+    const verts = [], faces = [];
+    const sub = (a, b) => a.map((v, i) => v - b[i]);
+    const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    const unit = (v, fallback) => {
+      const length = Math.hypot(...v);
+      return length > 1e-8 ? v.map(x => x / length) : fallback;
+    };
+    if (points.length !== 21 || points.some(p => p.some(v => !Number.isFinite(v)))) {
+      return { verts: new Float32Array(), faces: new Int32Array() };
+    }
+    const width = Math.hypot(...sub(points[5], points[17]));
+    if (width < 1e-6) return { verts: new Float32Array(), faces: new Int32Array() };
+    const normal = unit(cross(sub(points[5], points[0]), sub(points[17], points[0])), [0, 0, 1]);
+    const radius = Math.max(0.003, Math.min(0.012, width * 0.11));
+    const add = p => { const i = verts.length / 3; verts.push(...p); return i; };
+    const prism = (ringA, ringB) => {
+      const a = ringA.map(add), b = ringB.map(add), n = a.length;
+      for (let i = 1; i < n - 1; i += 1) {
+        faces.push(a[0], a[i + 1], a[i], b[0], b[i], b[i + 1]);
+      }
+      for (let i = 0; i < n; i += 1) {
+        const j = (i + 1) % n;
+        faces.push(a[i], a[j], b[j], a[i], b[j], b[i]);
+      }
+    };
+    const palm = [0, 1, 5, 9, 13, 17].map(i => points[i]);
+    prism(palm.map(p => p.map((v, i) => v - normal[i] * radius)),
+          palm.map(p => p.map((v, i) => v + normal[i] * radius)));
+    for (const chain of FINGERS) {
+      // The wrist-to-MCP portion is represented by the palm, not another finger.
+      for (let k = 1; k < chain.length - 1; k += 1) {
+        const a = points[chain[k]], b = points[chain[k + 1]];
+        const bone = sub(b, a);
+        if (Math.hypot(...bone) < 1e-8) continue;
+        const axis = unit(bone, [0, 1, 0]);
+        let side = cross(axis, normal);
+        if (Math.hypot(...side) < 1e-8) side = cross(axis, Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]);
+        side = unit(side, [1, 0, 0]);
+        const up = unit(cross(axis, side), normal);
+        const ring = (p, r) => [[-1,-1],[1,-1],[1,1],[-1,1]].map(([u,v]) =>
+          p.map((x,i) => x + r * (u*side[i] + v*up[i])));
+        prism(ring(a, radius * (1 - 0.12 * (k - 1))), ring(b, radius * (1 - 0.12 * k)));
+      }
+    }
+    return { verts: new Float32Array(verts), faces: new Int32Array(faces) };
   }
 
   function drawShadedMesh(verts, faces, center, scale, ox, oy, base) {
@@ -945,7 +992,7 @@
     const width = world.width;
     const height = world.height;
     const frame = state.hands ? frameIndex(time) : -1;
-    const stamp = `${state.sample ? state.sample.id : ""}:${frame}:${width}:${height}:${state.hands && state.hands.mesh ? 1 : 0}`;
+    const stamp = `${state.sample ? state.sample.id : ""}:${frame}:${width}:${height}`;
     if (stamp === state.worldStamp) return;
     state.worldStamp = stamp;
 
@@ -959,7 +1006,7 @@
       wctx.fillText("World frame is still waiting for model output", width / 2, height / 2 - 9);
       wctx.fillStyle = "#5b6e88";
       wctx.font = "11px ui-monospace, monospace";
-      wctx.fillText("hands.npz → keypoints.npz + mesh.bin", width / 2, height / 2 + 13);
+      wctx.fillText("Waiting for keypoints.npz", width / 2, height / 2 + 13);
       wctx.textAlign = "start";
       return;
     }
@@ -1020,39 +1067,33 @@
       wctx.fillText("cam", pts[4][0] + 7, pts[4][1] - 4);
     }
 
-    if (hands.mesh && hands.mesh.n === hands.n) {
-      for (let hand = 0; hand < 2; hand += 1) {
-        if (!validAt(hand, frame)) continue;
-        const verts = copyMeshVerts(hands.mesh, hand, frame);
-        drawShadedMesh(verts, hands.mesh.faces, center, scale, ox, oy, HAND_BASE[hand]);
+    for (let hand = 0; hand < 2; hand += 1) {
+      if (!validAt(hand, frame)) continue;
+      const points = Array.from({ length: 21 }, (_, joint) => jointWorld(hand, frame, joint));
+      const geometry = buildLightHand(points);
+      if (geometry.faces.length) {
+        drawShadedMesh(geometry.verts, geometry.faces, center, scale, ox, oy, HAND_BASE[hand]);
       }
     }
 
     for (let hand = 0; hand < 2; hand += 1) {
+      // A masked current frame has neither a hand nor a hand trail.
+      if (!validAt(hand, frame)) continue;
       wctx.strokeStyle = HAND_TRAIL[hand];
       wctx.lineWidth = 1.5;
-      // One line per hand. After a masked frame the trail stops; the piece
-      // that would start again later is not drawn.
-      let runStart = -1;
-      let runEnd = -1;
-      for (let i = trailStart; i <= frame; i += 1) {
-        if (!validAt(hand, i)) {
-          if (runStart !== -1) break;
-          continue;
-        }
-        if (runStart === -1) runStart = i;
-        runEnd = i;
-      }
-      if (runStart !== -1) {
+      // Walk back from the current hand, stopping at the nearest mask.
+      // Older disconnected runs must not remain floating in the world view.
+      let runStart = frame;
+      while (runStart > trailStart && validAt(hand, runStart - 1)) runStart -= 1;
+      if (runStart < frame) {
         wctx.beginPath();
-        for (let i = runStart; i <= runEnd; i += 1) {
+        for (let i = runStart; i <= frame; i += 1) {
           const [u, v] = projectWorld(jointWorld(hand, i, 0));
           if (i === runStart) wctx.moveTo(u, v);
           else wctx.lineTo(u, v);
         }
         wctx.stroke();
       }
-      if (!validAt(hand, frame)) continue;
       const points = [];
       for (let joint = 0; joint < 21; joint += 1) points.push(projectWorld(jointWorld(hand, frame, joint)));
       wctx.lineWidth = 3;
@@ -1112,15 +1153,18 @@
     renderAnnotation(time);
   }
 
-  // The shaded mesh is the expensive part. Redraw it at about 10fps so the
-  // video decoder keeps the main thread; the skeleton still follows every frame.
+  // Keep a bounded world-view redraw rate; visibility changes still draw immediately.
   function loop(now) {
     const frame = state.hands
       ? frameIndex(video.currentTime || 0)
       : Math.floor((video.currentTime || 0) * 30);
     const frameChanged = frame !== paintedFrame;
+    // Do not retain a previously drawn hand during the mesh redraw throttle
+    // when its visibility changes, including single-frame masks.
+    const visibilityChanged = frameChanged && state.hands && paintedFrame >= 0 &&
+      [0, 1].some((hand) => validAt(hand, frame) !== validAt(hand, paintedFrame));
     if (frame !== paintedFrame) paintedFrame = frame;
-    const drawWorldNow = worldDirty || (frameChanged && (video.paused || now - lastWorldDraw > 100));
+    const drawWorldNow = worldDirty || visibilityChanged || (frameChanged && (video.paused || now - lastWorldDraw > 100));
     if (drawWorldNow) {
       lastWorldDraw = now;
       worldDirty = false;
@@ -1136,7 +1180,8 @@
     if (state.hands && state.hands.fps) {
       hudFrame.textContent =
         `T ${fmt(time)}   F ${String(frameIndex(time)).padStart(5, "0")} / ${state.hands.n}`;
-      egoNote.textContent = `undistorted · ${state.hands.fps.toFixed(0)} fps · 21-pt skeleton`;
+      const lens = state.hands.projection?.model === "kb4" ? "original fisheye" : "undistorted";
+      egoNote.textContent = `${lens} · ${state.hands.fps.toFixed(0)} fps · 21-pt skeleton`;
     } else {
       hudFrame.textContent = `T ${fmt(time)}`;
       egoNote.textContent = "undistorted · no hand estimates";
